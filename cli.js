@@ -6,9 +6,11 @@ const path = require('path')
 const find = require('array-find')
 const Q = require('bluebird-q')
 const vorpal = require('vorpal')()
-const repl = require('vorpal-repl')
+// const repl = require('vorpal-repl')
 const mkdirp = require('mkdirp')
-const debug = require('debug')('tradle-cli')
+const Table = require('cli-table')
+// const Debug = require('debug')
+// const debug = Debug('tradle-cli')
 const leveldown = require('leveldown')
 const constants = require('@tradle/constants')
 const Identity = require('@tradle/identity').Identity
@@ -22,6 +24,16 @@ const CUR_HASH = constants.CUR_HASH
 const SIG = constants.SIG
 const buildNode = require('./buildNode')
 const DEV = process.env.NODE_ENV === 'development'
+const BANNER =
+"\n###################################################################################################################\n" +
+"#                                                                                                                 #\n" +
+"#                                             Welcome to Tradle!                                                  #\n" +
+"#                                                                                                                 #\n" +
+"###################################################################################################################\n"
+
+const IDENTIFIER_EXPLANATION = '<identifier> can be the other party\'s key fingerprint, root hash or current hash'
+
+// for now
 const manualTxs = [
   // safe
   'a605b1b60a8616a7e145834e1831d498689eb5fc212d1e8c11c45a27ea59b5f8',
@@ -43,45 +55,7 @@ let tim
 
 runDefault()
 
-function runDefault () {
-  identity = require('./test/fixtures/bill-pub')
-  keys = require('./test/fixtures/bill-priv')
-  tim = buildNode({
-    pathPrefix: storagePath,
-    networkName: 'testnet',
-    identity: Identity.fromJSON(identity),
-    keys: keys,
-    syncInterval: 300000,
-    afterBlockTimestamp: constants.afterBlockTimestamp
-  })
-
-  tim.watchTxs(manualTxs)
-
-  tim.on('message', (info) => {
-    console.log(`received ${info[TYPE]} with hash: ${info[CUR_HASH]}`)
-  })
-
-  tim.on('unchained', (info) => {
-    console.log(`detected transaction sealing ${info[TYPE]} with hash: ${info[CUR_HASH]}`)
-  })
-
-  let otrKey = find(keys, (k) => {
-    return k.type === 'dsa'
-  })
-
-  if (!otrKey) {
-    this.log('no OTR key found')
-    return cb()
-  }
-
-  let transport = new WebSocketClient({
-    url: 'http://127.0.0.1:44444/ws/easy',
-    otrKey: DSA.parsePrivate(otrKey.priv)
-  })
-
-  transport.on('message', tim.receiveMsg)
-  tim._send = transport.send.bind(transport)
-}
+console.log(BANNER)
 
 vorpal
   .delimiter('tradle$')
@@ -119,6 +93,8 @@ vorpal
       syncInterval: 300000,
       afterBlockTimestamp: constants.afterBlockTimestamp
     })
+
+    tim.on('error', console.error)
 
     cb()
   })
@@ -159,33 +135,35 @@ vorpal
   })
 
 vorpal
-  .command('intro <to>', 'Introduce yourself to to someone')
+  .command('intro <identifier>', 'Introduce yourself to someone')
+  .help(IDENTIFIER_EXPLANATION)
   .action(function (args, cb) {
-    new Builder()
-      .data({
-        [TYPE]: 'tradle.IdentityPublishRequest',
-        identity: identity
-      })
-      .build()
-      .then((buf) => {
-        let msg = JSON.parse(buf.toString('binary'))
-        return previewSend.call(this, msg)
-      })
-      .then(msg => {
-        return tim.send({
-          msg: msg,
-          to: [{ fingerprint: args.to }],
-          public: true,
-          deliver: true
+    let opts = { deliver: true, public: true }
+
+    findRecipient(args.identifier)
+    .then((recipient) => opts.to = toCoords(recipient))
+    .then(() => {
+      console.log(opts)
+      return new Builder()
+        .data({
+          [TYPE]: 'tradle.IdentityPublishRequest',
+          identity: identity
         })
-      })
-      .then(() => this.log('message queued'))
-      .catch(err => this.log(err))
-      .finally(cb)
+        .build()
+    })
+    .then((buf) => {
+      opts.msg = buf
+      return previewSend.call(this, buf)
+    })
+    .then(() => tim.send(opts))
+    .then(() => this.log('message queued'))
+    .catch(err => this.log(err))
+    .then(() => cb())
   })
 
 vorpal
-  .command('msg <to>', 'Send a message to someone')
+  .command('simplemsg <identifier>', 'Send a message to someone')
+  .help(IDENTIFIER_EXPLANATION)
   .action(function (args, cb) {
     if (!tim) {
       this.log('please run "setuser" first')
@@ -197,31 +175,49 @@ vorpal
       return cb()
     }
 
-    let done
-    let opts = {
-      deliver: true
+    let opts = { deliver: true }
+
+    findRecipient(args.identifier)
+    .then((recipient) => opts.to = toCoords(recipient))
+    .then(() => {
+      return this.prompt([
+        {
+          type: 'input',
+          name: 'message',
+          message: 'enter your message '
+        }
+      ])
+    })
+    .then(result => {
+      return {
+        [TYPE]: 'tradle.SimpleMessage',
+        message: result.message
+      }
+    })
+    .then(maybeSign.bind(this))
+    .then(previewSend.bind(this))
+    .then(buildMsg)
+    .then(buf => {
+      opts.msg = buf
+      return tim.send(opts)
+    })
+    .then(() => this.log('message queued'))
+    .catch(err => this.log(err))
+    .then(() => cb())
+  })
+
+vorpal
+  .command('msg <identifier>', 'Send a message to someone')
+  .help(IDENTIFIER_EXPLANATION)
+  .action(function (args, cb) {
+    if (!tim) {
+      this.log('please run "setuser" first')
+      return cb()
     }
 
-    let msg = {}
-    let getRecipient = () => {
-      let ask
-      // if (args.to) {
-        ask = Q(args)
-      // } else {
-      //   ask = this.prompt([
-      //     {
-      //       type: 'input',
-      //       name: 'to',
-      //       message: 'enter recipient root hash or a fingerprint of one of their keys '
-      //     }
-      //   ])
-      // }
-
-      return ask
-      .then(result => findRecipient(result.to))
-      .then(recipient => {
-        opts.to = [{ [ROOT_HASH]: recipient[ROOT_HASH] }]
-      })
+    if (!tim._send) {
+      this.log('please run "settransport" first')
+      return cb()
     }
 
     let constructMessage = () => {
@@ -234,13 +230,16 @@ vorpal
         }
       ])
       .then((result) => {
-        msg[TYPE] = result.type
+        let msg = {
+          [TYPE]: result.type
+        }
+
         this.log('type: ' + result.type)
-        return getProperties()
+        return setProperties(msg)
       })
     }
 
-    let getProperties = () => {
+    let setProperties = (msg) => {
       return this.prompt([
         {
           type: 'confirm',
@@ -251,13 +250,15 @@ vorpal
       ])
       .then((result) => {
         if (result.more) {
-          return getProperty()
-            .then(() => getProperties())
+          return setProperty(msg)
+            .then(() => setProperties(msg))
         }
+
+        return msg
       })
     }
 
-    let getProperty = () => {
+    let setProperty = (msg) => {
       return this.prompt([
         {
           type: 'input',
@@ -274,40 +275,20 @@ vorpal
         let name = result.name
         let value = result.value
         msg[name] = value
+        return msg
       })
     }
 
-    let maybeSign = () => {
-      return this.prompt([
-        {
-          type: 'confirm',
-          name: 'sign',
-          message: 'sign the message? (yes) ',
-          default: true
-        }
-      ])
-      .then((result) => {
-        if (!result.sign) return
-
-        return tim.sign(msg)
-          .then(signed => {
-            msg = JSON.parse(signed.toString('binary'))
-            this.log('sig: ' + msg[SIG])
-          })
-      })
+    let opts = {
+      deliver: true
     }
 
-    let build = () => {
-      return Builder()
-        .data(msg)
-        .build()
-    }
-
-    getRecipient()
+    findRecipient(args.identifier)
+      .then((recipient) => opts.to = toCoords(recipient))
       .then(constructMessage)
-      .then(maybeSign)
-      .then(() => previewSend.call(this, msg))
-      .then(build)
+      .then(maybeSign.bind(this))
+      .then(previewSend.bind(this))
+      .then(buildMsg)
       .then((buf) => {
         opts.msg = buf
         return tim.send(opts)
@@ -337,7 +318,8 @@ vorpal
   // })
 
 vorpal
-  .command('ls [type]', 'List resources by type, e.g. `ls tradle.Identity`')
+  .command('ls', 'List stored resources')
+  .option('-t, --type', 'Limit resources by type, e.g. tradle.Identity')
   .action(function (args, cb) {
     if (!tim) {
       this.log('please run "setuser" first')
@@ -346,16 +328,62 @@ vorpal
 
     let results = []
     let err
+    // let cols = ['From', 'To', 'Date', 'TxId']
+    // let colWidths = [42, 42, 30, 42]
+    let types = args.options.type
+    if (types) {
+      types = types.split(',')
+    }
+    // else {
+    //   cols.unshift('Type')
+    //   colWidths.unshift(20)
+    // }
+
     tim.decryptedMessagesStream()
-      .on('data', (data) => {
-        if (!args.type || args.type.includes(data[TYPE])) {
-          results.push(data[CUR_HASH])
+      .on('data', data => {
+        if (!types || types.includes(data[TYPE])) {
+          results.push(data)
         }
       })
       .on('error', (e) => err = e)
       .on('end', () => {
-        if (err) this.log(err)
-        else results.forEach(r => this.log(r))
+        if (err) {
+          this.log(err)
+        } else if (!results.length) {
+          this.log('no results found')
+        } else {
+          // var table = new Table({
+          //   head: cols,
+          //   colWidths: colWidths
+          // })
+
+          // results.forEach(r => {
+          //   let date = new Date(r.timestamp)
+          //   table.push([
+          //     r[TYPE],
+          //     r.from ? r.from[ROOT_HASH] : '',
+          //     r.to ? r.to[ROOT_HASH] : '',
+          //     date.toString(),
+          //     r.txId || ''
+          //   ])
+          // })
+
+          this.log('Tip: use `show <hash>` to get full metadata')
+          var table = new Table({
+            head: ['Type', 'Hash'],
+            colWidths: [45, 45]
+          })
+
+          results.forEach(r => {
+            let date = new Date(r.timestamp)
+            table.push([
+              r[TYPE],
+              r[CUR_HASH]
+            ])
+          })
+
+          this.log(table.toString())
+        }
 
         cb()
       })
@@ -376,8 +404,15 @@ vorpal
         this.log(prettify(obj))
       })
       .catch(err => this.log(err))
-      .finally(cb)
+      .then(() => cb())
   })
+
+// vorpal
+//   .command('debug <namespaces>', 'Enable debug namespaces')
+//   .action(function (args, cb) {
+//     Debug.enable(args.namespaces)
+//     cb()
+//   })
 
 vorpal
   .command('watchTx <hash>', 'Watch a blockchain transaction')
@@ -405,6 +440,7 @@ vorpal
 
 vorpal
   .command('forget <identifier>', 'Forget someone (wipe all history with them)')
+  .help(IDENTIFIER_EXPLANATION)
   .action(function (args, cb) {
     if (!tim) {
       this.log('please run "setuser" first')
@@ -415,7 +451,7 @@ vorpal
       .then(r => tim.forget(r[ROOT_HASH]))
       .then(() => this.log('forgot ' + args.identifier))
       .catch(err => this.log(err))
-      .finally(cb)
+      .then(() => cb())
   })
 
 vorpal
@@ -426,7 +462,7 @@ vorpal
     tim
       .destroy()
       .catch(err => this.log(err))
-      .finally(cb)
+      .then(() => cb())
   })
 
 vorpal
@@ -442,7 +478,7 @@ function printIdentityPublishStatus (tim) {
       else if (!status.ever) msg += 'unpublished'
       else msg += 'published, needs republish'
 
-      console.log(msg)
+      debug(msg)
     })
     .catch((err) => {
       console.error('failed to get identity status', err.message)
@@ -496,12 +532,20 @@ function findRecipient (identifier) {
   })
 }
 
+function toCoords (recipient) {
+  return [{ [ROOT_HASH]: recipient[ROOT_HASH] }]
+}
+
 function previewSend (msg) {
+  let json = Buffer.isBuffer(msg)
+    ? JSON.parse(msg.toString('binary'))
+    : msg
+
   return this.prompt([
     {
       type: 'confirm',
       name: 'confirm',
-      message: `About to send \n${prettify(msg)}\n\nIs this OK? (yes)`,
+      message: `About to send \n${prettify(json)}\n\nIs this OK? (yes)`,
       default: true
     }
   ])
@@ -514,3 +558,78 @@ function previewSend (msg) {
   })
 }
 
+function maybeSign (msg) {
+  return this.prompt([
+    {
+      type: 'confirm',
+      name: 'sign',
+      message: 'sign the message? (yes) ',
+      default: true
+    }
+  ])
+  .then((result) => {
+    if (!result.sign) return msg
+
+    return tim.sign(msg)
+      .then(signed => {
+        let sig = JSON.parse(signed.toString('binary'))[SIG]
+        this.log('sig: ' + sig)
+        return signed
+      })
+  })
+}
+
+function buildMsg (msg) {
+  return Builder()
+    .data(msg)
+    .build()
+}
+
+function runDefault () {
+  identity = require('./test/fixtures/bill-pub')
+  keys = require('./test/fixtures/bill-priv')
+  tim = buildNode({
+    pathPrefix: storagePath,
+    networkName: 'testnet',
+    identity: Identity.fromJSON(identity),
+    keys: keys,
+    syncInterval: 300000,
+    afterBlockTimestamp: constants.afterBlockTimestamp
+  })
+
+  tim.watchTxs(manualTxs)
+
+  tim.on('message', (info) => {
+    debug(`received ${info[TYPE]} with hash: ${info[CUR_HASH]}`)
+    // tim.lookupObject(info)
+    //   .then(obj => debug(prettify(obj.parsed.data)))
+  })
+
+  tim.on('unchained', (info) => {
+    debug(`detected transaction sealing ${info[TYPE]} with hash: ${info[CUR_HASH]}`)
+    // tim.lookupObject(info)
+    //   .then(obj => debug(prettify(obj.parsed.data)))
+  })
+
+  let otrKey = find(keys, (k) => {
+    return k.type === 'dsa'
+  })
+
+  if (!otrKey) {
+    this.log('no OTR key found')
+    return cb()
+  }
+
+  let transport = new WebSocketClient({
+    url: 'http://127.0.0.1:44444/ws/easy',
+    otrKey: DSA.parsePrivate(otrKey.priv)
+  })
+
+  transport.on('message', tim.receiveMsg)
+  tim._send = transport.send.bind(transport)
+  tim.on('error', console.error)
+}
+
+function debug () {
+  return console.log.apply(console, arguments)
+}
