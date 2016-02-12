@@ -22,6 +22,7 @@
     "@tradle/ws-client": "^1.4.0",
     "array-find": "^1.0.0",
     "bluebird-q": "^1.0.3",
+    "bs58check": "^1.0.8",
     "cli-table": "^0.3.1",
     "debug": "^2.2.0",
     "leveldown": "^1.4.4",

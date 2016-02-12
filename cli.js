@@ -1,11 +1,16 @@
 #!/usr/bin/env node
 'use strict'
 
+if (!('DEBUG' in process.env)) {
+  process.env.DEBUG = '*'
+}
+
 const fs = require('fs')
 const path = require('path')
 // const spawn = require('child_process').spawn
 const find = require('array-find')
 const Q = require('bluebird-q')
+const bs58check = require('bs58check')
 const vorpal = require('vorpal')()
 // const repl = require('vorpal-repl')
 const mkdirp = require('mkdirp')
@@ -26,6 +31,8 @@ const SIG = constants.SIG
 const buildNode = require('./buildNode')
 const DEV = process.env.NODE_ENV === 'development'
 const noop = () => {}
+Debug.log = noop // initially
+
 const BANNER =
 "\n###################################################################################################################\n" +
 "#                                                                                                                 #\n" +
@@ -101,7 +108,7 @@ vorpal
         identity: identity
       }
 
-      return sendMsg.call(this, opts, cb)
+      return sendMsg.call(this, opts)
     })
 
     //   return new Builder()
@@ -114,7 +121,7 @@ vorpal
     // })
     // .then(() => tim.send(opts))
     // .then(() => this.log('message queued'))
-    // .catch(err => this.log(err))
+    .catch(err => this.log(err))
     .then(() => cb())
   })
 
@@ -140,15 +147,15 @@ vorpal
       ])
     })
     .then(result => {
-      return {
+      opts.msg = {
         [TYPE]: 'tradle.SimpleMessage',
         message: result.message
       }
+
+      return sendMsg.call(this, opts)
     })
-    .then((msg) => {
-      opts.msg = msg
-      sendMsg.call(this, opts, cb)
-    })
+    .catch(err => this.log(err))
+    .then(() => cb())
   })
 
 vorpal
@@ -225,8 +232,10 @@ vorpal
       .then(constructMessage)
       .then((msg) => {
         opts.msg = msg
-        sendMsg.call(this, opts, cb)
+        return sendMsg.call(this, opts)
       })
+      .catch(err => this.log(err))
+      .then(() => cb())
   })
   // .cancel(function () {
   //   this.log('message canceled');
@@ -324,7 +333,18 @@ vorpal
       return cb()
     }
 
+    try {
+      let buf = new Buffer(args.hash, 'hex')
+      if (buf.length !== 32) {
+        throw new Error('invalid tx hash')
+      }
+    } catch (err) {
+      this.log(err)
+      return cb()
+    }
+
     tim.watchTxs(args.hash)
+    tim.sync()
     cb()
   })
 
@@ -336,7 +356,15 @@ vorpal
       return cb()
     }
 
+    try {
+      bs58check.decode(args.address)
+    } catch (err) {
+      this.log(err)
+      return cb()
+    }
+
     tim.watchAddresses(args.address)
+    tim.sync()
     cb()
   })
 
@@ -372,8 +400,16 @@ vorpal
   .action(function (args, cb) {
     if (!tim) return cb()
 
-    this.log(prettify(tim.identityJSON))
-    cb()
+    // return show.call(this, { hash: tim.myCurrentHash() }, cb)
+    // tim.lookupObjectByCurHash(tim.myCurrentHash())
+    //   .then((obj) => this.log(obj))
+    this.log('Current hash: ' + tim.myCurrentHash())
+    this.log('Root hash: ' + tim.myRootHash())
+    printIdentityPublishStatus(tim)
+      .then(() => {
+        this.log(prettify(tim.identityJSON))
+        cb()
+      })
   })
 
 // vorpal
@@ -393,7 +429,7 @@ vorpal
   .description('Exit Tradle command line client. Please run `stop` first')
 
 function printIdentityPublishStatus (tim) {
-  tim.identityPublishStatus()
+  return tim.identityPublishStatus()
     .then((status) => {
       let msg = 'identity status: '
       if (status.current) msg += 'published latest'
@@ -401,10 +437,10 @@ function printIdentityPublishStatus (tim) {
       else if (!status.ever) msg += 'unpublished'
       else msg += 'published, needs republish'
 
-      debug(msg)
+      vorpal.log(msg)
     })
     .catch((err) => {
-      console.error('failed to get identity status', err.message)
+      vorpal.log('failed to get identity status', err.message)
     })
 }
 
@@ -527,7 +563,7 @@ function debug () {
   return console.log.apply(console, arguments)
 }
 
-function sendMsg (opts, cb) {
+function sendMsg (opts) {
   let msg = opts.msg
   return maybeSign.call(this, msg)
     .then(previewSend.bind(this))
@@ -547,15 +583,7 @@ function sendMsg (opts, cb) {
       }
 
       tim.on('sent', sentHandler)
-    }, (err) => {
-      this.log(err.message)
     })
-    .then(() => cb())
-    .catch(err => {
-      this.log(err)
-      cb()
-    })
-
 }
 
 function setUser (args, cb) {
@@ -607,14 +635,12 @@ function setUser (args, cb) {
   tim.on('error', (err) => vorpal.log(err))
   tim.on('message', (info) => {
     vorpal.log(`received ${info[TYPE]} with hash: ${info[CUR_HASH]}`)
-    // tim.lookupObject(info)
-    //   .then(obj => debug(prettify(obj.parsed.data)))
+    lookupAndLog(info)
   })
 
   tim.on('unchained', (info) => {
     vorpal.log(`detected transaction sealing ${info[TYPE]} with hash: ${info[CUR_HASH]}`)
-    // tim.lookupObject(info)
-    //   .then(obj => debug(prettify(obj.parsed.data)))
+    lookupAndLog(info)
   })
 
   cb()
@@ -671,12 +697,17 @@ function show (args, cb) {
 }
 
 function canSend (cb) {
-  let log = (this.log || vorpal.log)
+  let logger = this.log ? this : vorpal
   if (!tim) {
-    log('please run "setuser" first')
+    logger.log('please run "setuser" first')
   } else if (!tim._send) {
-    log('please run "settransport" first')
+    logger.log('please run "settransport" first')
+  } else {
+    return true
   }
+}
 
-  return true
+function lookupAndLog (info) {
+  tim.lookupObject(info)
+    .then(obj => vorpal.log(prettify(obj.parsed.data)))
 }
