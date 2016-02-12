@@ -7,6 +7,7 @@ const find = require('array-find')
 const Q = require('bluebird-q')
 const vorpal = require('vorpal')()
 const repl = require('vorpal-repl')
+const mkdirp = require('mkdirp')
 const debug = require('debug')('tradle-cli')
 const leveldown = require('leveldown')
 const constants = require('@tradle/constants')
@@ -32,7 +33,10 @@ const manualTxs = [
   '235f8ffd7a3f5ecd5de3408cfaad0d01a36a96195ff491850257bc5c3098b28b'
 ]
 
-let storagePath = path.resolve('./storage') + '/bill'
+let baseStoragePath = path.resolve('./storage')
+mkdirp.sync(baseStoragePath)
+
+let storagePath = baseStoragePath + '/bill'
 let identity
 let keys
 let tim
@@ -54,11 +58,11 @@ function runDefault () {
   tim.watchTxs(manualTxs)
 
   tim.on('message', (info) => {
-    console.log('received new message with hash: ' + info[CUR_HASH])
+    console.log(`received ${info[TYPE]} with hash: ${info[CUR_HASH]}`)
   })
 
   tim.on('unchained', (info) => {
-    console.log('detected transaction sealing message with hash: ' + info[CUR_HASH])
+    console.log(`detected transaction sealing ${info[TYPE]} with hash: ${info[CUR_HASH]}`)
   })
 
   let otrKey = find(keys, (k) => {
@@ -72,9 +76,10 @@ function runDefault () {
 
   let transport = new WebSocketClient({
     url: 'http://127.0.0.1:44444/ws/easy',
-    otrKey: DSA.parsePrivate(otrKey.value)
+    otrKey: DSA.parsePrivate(otrKey.priv)
   })
 
+  transport.on('message', tim.receiveMsg)
   tim._send = transport.send.bind(transport)
 }
 
@@ -358,6 +363,7 @@ vorpal
 
 vorpal
   .command('show <hash>', 'Print a stored object')
+  .option('-v, --verbose', 'Print all metadata as well.')
   .action(function (args, cb) {
     if (!tim) {
       this.log('please run "setuser" first')
@@ -365,7 +371,10 @@ vorpal
     }
 
     tim.lookupObjectByCurHash(args.hash)
-      .then(obj => this.log(prettify(obj)))
+      .then(obj => {
+        obj = args.options.verbose ? obj : obj.parsed.data
+        this.log(prettify(obj))
+      })
       .catch(err => this.log(err))
       .finally(cb)
   })
