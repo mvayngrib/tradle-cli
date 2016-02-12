@@ -57,6 +57,7 @@ const manualTxs = [
 console.log(BANNER)
 
 let DEFAULT_STORAGE_PATH = path.resolve('./storage')
+let storagePath
 let identity
 let keys
 let tim
@@ -82,6 +83,7 @@ if (pargv.length) {
 vorpal
   .delimiter('tradle$')
   .history('tradle-cli')
+  .localStorage('tradle-cli')
   // .use(repl)
   .show()
 
@@ -421,6 +423,20 @@ vorpal
 //   })
 
 vorpal
+  .command('alias <alias> <identifier>', 'Create an alias for a contact')
+  .action(function (args, cb) {
+    if (!tim) {
+      this.log('please run "setuser" first')
+      return cb()
+    }
+
+    findRecipient(args.identifier)
+      .then(() => setAlias(args.alias, args.identifier))
+      .catch(err => this.log(err))
+      .then(() => cb())
+  })
+
+vorpal
   .catch('[hash]', 'Look up object')
   .action(show)
 
@@ -477,6 +493,7 @@ function prettifyReplacer (key, val) {
 }
 
 function findRecipient (identifier) {
+  identifier = getAlias(identifier) || identifier
   return Q.allSettled([
     tim.lookupIdentity({ fingerprint: identifier }),
     tim.lookupIdentity({ [ROOT_HASH]: identifier })
@@ -609,7 +626,7 @@ function setUser (args, cb) {
     return cb()
   }
 
-  let storagePath = args.options.dir || path.join(DEFAULT_STORAGE_PATH, path.basename(iPath).split('.')[0])
+  storagePath = args.options.dir || path.join(DEFAULT_STORAGE_PATH, path.basename(iPath).split('.')[0])
   let logsPath = path.resolve(storagePath, 'logs')
   let logPath = path.join(logsPath, 'debug-' + Date.now() + '.log')
   mkdirp.sync(storagePath)
@@ -710,4 +727,12 @@ function canSend (cb) {
 function lookupAndLog (info) {
   tim.lookupObject(info)
     .then(obj => vorpal.log(prettify(obj.parsed.data)))
+}
+
+function setAlias (alias, identifier) {
+  vorpal.localStorage.setItem('alias:' + alias, identifier)
+}
+
+function getAlias (alias) {
+  return vorpal.localStorage.getItem('alias:' + alias)
 }
