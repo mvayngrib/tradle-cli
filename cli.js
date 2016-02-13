@@ -29,9 +29,36 @@ const ROOT_HASH = constants.ROOT_HASH
 const CUR_HASH = constants.CUR_HASH
 const SIG = constants.SIG
 const buildNode = require('./buildNode')
-const DEV = process.env.NODE_ENV === 'development'
+const genUser = require('./genUser')
+const DEV = true//process.env.NODE_ENV === 'development'
+const NETWORK_NAME = 'testnet'
 const noop = () => {}
 Debug.log = noop // initially
+
+let selfDestructing
+let cleanup = (err) => {
+  if (err && typeof err === 'object') {
+    logErr(err)
+  }
+
+  if (selfDestructing) return
+
+  selfDestructing = true
+  debug('cleaning up before shut down...')
+  if (state.tim) {
+    state.tim.destroy()
+      .then(() => process.exit(0))
+      .catch(err => process.exit(1))
+  } else {
+    process.exit(0)
+  }
+}
+
+process.on('uncaughtException', cleanup)
+process.on('exit', cleanup)
+process.on('SIGINT', cleanup)
+process.on('SIGTERM', cleanup)
+
 
 const BANNER =
 "\n###################################################################################################################\n" +
@@ -56,31 +83,7 @@ const manualTxs = [
 
 console.log(BANNER)
 
-let DEFAULT_STORAGE_PATH = path.resolve('./storage')
-let storagePath
-let identity
-let keys
-let tim
-let currentMode
-let pargv = process.argv.slice(2)
-
-if (pargv.length) {
-  // runDefault()
-  setUser.call(vorpal, {
-    pathToIdentity: pargv[0],
-    pathToKeys: pargv[1],
-    options: {}
-  })
-
-  if (pargv[2]) {
-    setTransport.call(vorpal, {
-      type: 'ws',
-      // 'http://127.0.0.1:44444/ws/easy'
-      serverUrl: pargv[2],
-      options: {}
-    })
-  }
-}
+let state = {}
 
 vorpal
   .delimiter('tradle$')
@@ -88,20 +91,61 @@ vorpal
   // .use(repl)
   .show()
   .on('exitmode', function () {
-    currentMode = null
+    state.currentMode = null
   })
 
 vorpal
-  .command('setuser <pathToIdentity> <pathToKeys>', 'Set acting identity')
-  .option('-d, --dir', 'Path to storage directory')
+  .command('setuser <handle>', 'Set acting identity')
   .action(setUser)
+
+vorpal
+  .command('newuser <handle>', 'Create a new identity')
+  .action(function (args, cb) {
+    let handle = args.handle
+    if (!/^[a-zA-Z0-9_-]+$/.test(handle)) {
+      this.log('Alpanumeric characters, underscores and dashes only please')
+      return cb()
+    }
+
+    this.log(`Generating a really good ${handle}. This may take a few seconds...`)
+
+    Q.nfcall(genUser, {
+      networkName: NETWORK_NAME
+    })
+    .then((user) => {
+      let userPath = getUserPath(handle)
+      mkdirp.sync(userPath)
+      mkdirp.sync(getLogsPath(handle))
+      return Q.all([
+        Q.ninvoke(fs, 'writeFile', getIdentityPath(handle), prettify(user.pub)),
+        Q.ninvoke(fs, 'writeFile', getKeysPath(handle), prettify(user.priv)),
+        Q.ninvoke(fs, 'writeFile', getPreferencesPath(handle), prettify({ aliases: {} }))
+      ])
+    })
+    .then(() => this.log(`Generated new user: ${handle}`))
+    .catch(err => logErr.call(this, err))
+    .then(() => cb())
+  })
+
+vorpal
+  .command('ls-users', 'List users')
+  .action(function (args, cb) {
+    try {
+      let handles = fs.readdirSync(getBasePath())
+      handles.forEach(handle => this.log(handle))
+    } catch (err) {
+      this.log('no users found')
+    }
+
+    cb()
+  })
 
 vorpal
   .command('settransport <type> <serverUrl>', 'Set transport: "ws" or "http"')
   .action(setTransport)
 
 vorpal
-  .command('intro <identifier>', 'Introduce yourself to someone')
+  .command('contact <identifier>', 'Call a stranger')
   .help(IDENTIFIER_EXPLANATION)
   .action(function (args, cb) {
     let opts = { deliver: true, public: true }
@@ -111,7 +155,7 @@ vorpal
       opts.to = toCoords(recipient)
       opts.msg = {
         [TYPE]: 'tradle.IdentityPublishRequest',
-        identity: identity
+        identity: state.identity
       }
 
       return sendMsg.call(this, opts)
@@ -127,7 +171,7 @@ vorpal
     // })
     // .then(() => tim.send(opts))
     // .then(() => this.log('message queued'))
-    .catch(err => this.log(err))
+    .catch(err => logErr.call(this, err))
     .then(() => cb())
   })
 
@@ -160,7 +204,7 @@ vorpal
 
       return sendMsg.call(this, opts)
     })
-    .catch(err => this.log(err))
+    .catch(err => logErr.call(this, err))
     .then(() => cb())
   })
 
@@ -240,7 +284,7 @@ vorpal
         opts.msg = msg
         return sendMsg.call(this, opts)
       })
-      .catch(err => this.log(err))
+      .catch(err => logErr.call(this, err))
       .then(() => cb())
   })
   // .cancel(function () {
@@ -251,7 +295,7 @@ vorpal
   .command('ls', 'List stored resources')
   .option('-t, --type', 'Limit resources by type, e.g. tradle.Identity')
   .action(function (args, cb) {
-    if (!tim) {
+    if (!state.tim) {
       this.log('please run "setuser" first')
       return cb()
     }
@@ -269,7 +313,7 @@ vorpal
     //   colWidths.unshift(20)
     // }
 
-    tim.decryptedMessagesStream()
+    state.tim.decryptedMessagesStream()
       .on('data', data => {
         if (!types || types.includes(data[TYPE])) {
           results.push(data)
@@ -277,7 +321,7 @@ vorpal
       })
       .on('error', (e) => {
         err = e
-        this.log(err)
+        logErr.call(this, err)
         cb() // call here, might not get to 'end'
       })
       .on('end', () => {
@@ -324,7 +368,7 @@ vorpal
   })
 
 vorpal
-  .command('show <hash>', 'Print a stored object')
+  .command('show-obj <hash>', 'Print a stored object')
   .option('-v, --verbose', 'Print all metadata as well.')
   .action(show)
 
@@ -336,9 +380,42 @@ vorpal
 //   })
 
 vorpal
+  .command('ls-txs', 'List tracked txs')
+  .action(function (args, cb) {
+    if (!checkLoggedIn()) return cb()
+
+    state.tim.transactions().createKeyStream()
+      .on('data', txId => this.log(txId))
+      .on('end', cb)
+      .on('error', err => {
+        this.log(err)
+        cb()
+      })
+  })
+
+vorpal
+  .command('show-tx <txId>', 'Show transaction')
+  .action(function (args, cb) {
+    if (!checkLoggedIn()) return cb()
+
+    state.tim.transactions().get(args.txId, (err, tx) => {
+      if (tx) {
+        for (let p in tx) {
+          if (Buffer.isBuffer(tx[p])) {
+            tx[p] = tx[p].toString('hex')
+          }
+        }
+      }
+
+      this.log(err || tx)
+      cb()
+    })
+  })
+
+vorpal
   .command('watchTx <hash>', 'Watch a blockchain transaction')
   .action(function (args, cb) {
-    if (!tim) {
+    if (!state.tim) {
       this.log('please run "setuser" first')
       return cb()
     }
@@ -349,19 +426,19 @@ vorpal
         throw new Error('invalid tx hash')
       }
     } catch (err) {
-      this.log(err)
+      logErr.call(this, err)
       return cb()
     }
 
-    tim.watchTxs(args.hash)
-    tim.sync()
+    state.tim.watchTxs(args.hash)
+    state.tim.sync()
     cb()
   })
 
 vorpal
   .command('watchAddr <address>', 'Watch a blockchain address')
   .action(function (args, cb) {
-    if (!tim) {
+    if (!state.tim) {
       this.log('please run "setuser" first')
       return cb()
     }
@@ -369,12 +446,12 @@ vorpal
     try {
       bs58check.decode(args.address)
     } catch (err) {
-      this.log(err)
+      logErr.call(this, err)
       return cb()
     }
 
-    tim.watchAddresses(args.address)
-    tim.sync()
+    state.tim.watchAddresses(args.address)
+    state.tim.sync()
     cb()
   })
 
@@ -382,42 +459,42 @@ vorpal
   .command('forget <identifier>', 'Forget someone (wipe all history with them)')
   .help(IDENTIFIER_EXPLANATION)
   .action(function (args, cb) {
-    if (!tim) {
+    if (!state.tim) {
       this.log('please run "setuser" first')
       return cb()
     }
 
     findRecipient(args.identifier)
-      .then(r => tim.forget(r[ROOT_HASH]))
+      .then(r => state.tim.forget(r[ROOT_HASH]))
       .then(() => this.log('forgot ' + args.identifier))
-      .catch(err => this.log(err))
+      .catch(err => logErr.call(this, err))
       .then(() => cb())
   })
 
 vorpal
   .command('stop', 'Call this before exiting to give things a chance to clean up nicely')
   .action(function (args, cb) {
-    if (!tim) return cb()
+    if (!state.tim) return cb()
 
     tim
       .destroy()
-      .catch(err => this.log(err))
+      .catch(err => logErr.call(this, err))
       .then(() => cb())
   })
 
 vorpal
   .command('whoami', 'Print your identity')
   .action(function (args, cb) {
-    if (!tim) return cb()
+    if (!state.tim) return cb()
 
     // return show.call(this, { hash: tim.myCurrentHash() }, cb)
     // tim.lookupObjectByCurHash(tim.myCurrentHash())
     //   .then((obj) => this.log(obj))
-    this.log('Current hash: ' + tim.myCurrentHash())
-    this.log('Root hash: ' + tim.myRootHash())
-    printIdentityPublishStatus(tim)
+    this.log('Current hash: ' + state.tim.myCurrentHash())
+    this.log('Root hash: ' + state.tim.myRootHash())
+    printIdentityPublishStatus(state.tim)
       .then(() => {
-        this.log(prettify(tim.identityJSON))
+        this.log(prettify(state.tim.identityJSON))
         cb()
       })
   })
@@ -433,21 +510,21 @@ vorpal
 vorpal
   .command('alias <alias> <identifier>', 'Create an alias for a contact')
   .action(function (args, cb) {
-    if (!tim) {
+    if (!state.tim) {
       this.log('please run "setuser" first')
       return cb()
     }
 
     findRecipient(args.identifier)
       .then(() => setAlias(args.alias, args.identifier))
-      .catch(err => this.log(err))
+      .catch(err => logErr.call(this, err))
       .then(() => cb())
   })
 
 vorpal
   .command('aliases', 'list aliases')
   .action(function (args, cb) {
-    this.log(prettify(getAliases()))
+    this.log(prettify(state.preferences.aliases))
     cb()
   })
 
@@ -455,22 +532,23 @@ let chattingWith // hack, need to figure out how to save state in mode
 vorpal
   .mode('chat <identifier>')
   .init(function (args, cb) {
-    currentMode = 'chat'
+    state.currentMode = 'chat'
 
+    this.foo = 'hey'
     let id = args.identifier
     findRecipient(id)
       .then(recipient => {
         chattingWith = toCoords(recipient)
       })
-      .catch(err => this.log(err))
+      .catch(err => logErr.call(this, err))
       .then(() => cb())
 
-    tim.on('message', onMessage)
-    vorpal.once('exitmode', () => tim.removeListener('message', onMessage))
+    state.tim.on('message', onMessage)
+    vorpal.once('exitmode', () => state.tim.removeListener('message', onMessage))
 
     function onMessage(info) {
       if (info[TYPE] === 'tradle.SimpleMessage') {
-        tim.lookupObject(info)
+        state.tim.lookupObject(info)
           .then(obj => this.log('them: ' + obj.parsed.data.message))
       }
     }
@@ -480,15 +558,15 @@ vorpal
       [TYPE]: 'tradle.SimpleMessage',
       message: msg
     })
-    .then(buf => tim.sign(buf))
+    .then(buf => state.tim.sign(buf))
     .then(signed => {
-      return tim.send({
+      return state.tim.send({
         msg: signed,
         to: chattingWith,
         deliver: true
       })
     })
-    .catch(err => this.log(err))
+    .catch(err => logErr.call(this, err))
     .then(() => cb())
   })
 
@@ -516,18 +594,6 @@ function printIdentityPublishStatus (tim) {
     })
 }
 
-function cleanup () {
-  if (selfDestructing) return
-
-  selfDestructing = true
-  debug('cleaning up before shut down...')
-  tim.destroy()
-    .done(() => {
-      debug('shutting down')
-      process.exit()
-    })
-}
-
 function prettify (obj) {
   return JSON.stringify(obj, prettifyReplacer, 2)
 }
@@ -551,8 +617,8 @@ function prettifyReplacer (key, val) {
 function findRecipient (identifier) {
   identifier = getAlias(identifier) || identifier
   return Q.allSettled([
-    tim.lookupIdentity({ fingerprint: identifier }),
-    tim.lookupIdentity({ [ROOT_HASH]: identifier })
+    state.tim.lookupIdentity({ fingerprint: identifier }),
+    state.tim.lookupIdentity({ [ROOT_HASH]: identifier })
   ])
   .then(results => {
     for (let i = 0; i < results.length; i++) {
@@ -602,7 +668,7 @@ function maybeSign (msg) {
   .then((result) => {
     if (!result.sign) return msg
 
-    return tim.sign(msg)
+    return state.tim.sign(msg)
       .then(signed => {
         let sig = JSON.parse(signed.toString('binary'))[SIG]
         this.log('sig: ' + sig)
@@ -617,23 +683,24 @@ function buildMsg (msg) {
     .build()
 }
 
-function runDefault () {
-  setUser.call(vorpal, {
-    pathToIdentity: './test/fixtures/bill-pub',
-    pathToKeys: './test/fixtures/bill-priv',
-    options: {
-      dir: path.join(DEFAULT_STORAGE_PATH, 'bill')
-    }
-  })
+// function runDefault () {
+//   setUser.call(vorpal, {
+//     pathToIdentity: './test/fixtures/bill-pub',
+//     pathToKeys: './test/fixtures/bill-priv',
+//     options: {
+//       dir: path.join(DEFAULT_STORAGE_PATH, 'bill')
+//     }
+//   })
 
-  setTransport.call(vorpal, {
-    type: 'ws',
-    serverUrl: 'http://127.0.0.1:44444/ws/easy'
-  })
-}
+//   setTransport.call(vorpal, {
+//     type: 'ws',
+//     serverUrl: 'http://127.0.0.1:44444/ws/easy'
+//   })
+// }
 
 function debug () {
-  return console.log.apply(console, arguments)
+  let logger = vorpal || console
+  return logger.log.apply(logger, arguments)
 }
 
 function sendMsg (opts) {
@@ -643,7 +710,7 @@ function sendMsg (opts) {
     .then(buildMsg)
     .then((buf) => {
       opts.msg = buf
-      return tim.send(opts)
+      return state.tim.send(opts)
     })
     .then((entries) => {
       this.log('message queued')
@@ -651,42 +718,52 @@ function sendMsg (opts) {
       let sentHandler = (info) => {
         if (info[ROOT_HASH] === rh) {
           this.log(`delivered ${info[TYPE]} with hash ${rh}`)
-          tim.removeListener('sent', sentHandler)
+          state.tim.removeListener('sent', sentHandler)
         }
       }
 
-      tim.on('sent', sentHandler)
+      state.tim.on('sent', sentHandler)
     })
 }
 
 function setUser (args, cb) {
   cb = cb || noop
-  if (tim) {
-    this.log('please exit and re-enter')
-    return cb()
+  if (state.tim) {
+    return state.tim.destroy()
+      .then(() => {
+        state.tim = null
+        setUser(args, cb)
+      })
   }
 
-  let iPath = path.resolve(args.pathToIdentity)
-  let kPath = path.resolve(args.pathToKeys)
+  let handle = state.handle = args.handle
+  let userPath = getUserPath(handle)
+  let iPath = getIdentityPath(handle)
+  let kPath = getKeysPath(handle)
+  let pPath = getPreferencesPath(handle)
   try {
-    identity = require(iPath)
+    state.identity = require(iPath)
   } catch (err) {
     this.log(err.message)
     return cb()
   }
 
   try {
-    keys = require(kPath)
+    state.keys = require(kPath)
   } catch (err) {
     this.log(err.message)
     return cb()
   }
 
-  storagePath = args.options.dir || path.join(DEFAULT_STORAGE_PATH, path.basename(iPath).split('.')[0])
-  let logsPath = path.resolve(storagePath, 'logs')
+  try {
+    state.preferences = require(pPath)
+  } catch (err) {
+    this.log(err.message)
+    return cb()
+  }
+
+  let logsPath = getLogsPath(handle)
   let logPath = path.join(logsPath, 'debug-' + Date.now() + '.log')
-  mkdirp.sync(storagePath)
-  mkdirp.sync(logsPath)
   let logStream = fs.createWriteStream(logPath, {'flags': 'a'})
 
   Debug.enable()
@@ -695,39 +772,38 @@ function setUser (args, cb) {
     logStream.write(str)
   }
 
-  tim = buildNode({
-    pathPrefix: storagePath,
-    networkName: 'testnet',
-    identity: Identity.fromJSON(identity),
-    keys: keys,
+  state.tim = buildNode({
+    pathPrefix: path.resolve(userPath, 'tim'),
+    networkName: NETWORK_NAME,
+    identity: Identity.fromJSON(state.identity),
+    keys: state.keys,
     syncInterval: 300000,
     afterBlockTimestamp: constants.afterBlockTimestamp
   })
 
-  tim.watchTxs(manualTxs)
-  tim.on('error', (err) => vorpal.log(err))
-  tim.on('message', (info) => {
+  state.tim.watchTxs(manualTxs)
+  state.tim.on('error', (err) => vorpal.log(err))
+  state.tim.on('message', (info) => {
     if (!currentMode) {
       vorpal.log(`received ${info[TYPE]} with hash: ${info[CUR_HASH]}`)
       lookupAndLog(info)
     }
   })
 
-  tim.on('unchained', (info) => {
+  state.tim.on('unchained', (info) => {
     if (!currentMode) {
       vorpal.log(`detected transaction sealing ${info[TYPE]} with hash: ${info[CUR_HASH]}`)
-      lookupAndLog(info)
+      // lookupAndLog(info)
     }
   })
 
-  vorpal.localStorage('tradle-cli-' + identity.pubkeys[0].fingerprint)
-
+  // vorpal.localStorage('tradle-cli-' + identity.pubkeys[0].fingerprint)
   cb()
 }
 
 function setTransport (args, cb) {
   cb = cb || noop
-  if (!tim) {
+  if (!state.tim) {
     this.log('please run "setuser" first')
     return cb()
   }
@@ -735,7 +811,7 @@ function setTransport (args, cb) {
   let serverUrl = args.serverUrl
   let transport
   if (args.type === 'ws') {
-    let otrKey = find(keys, (k) => {
+    let otrKey = find(state.keys, (k) => {
       return k.type === 'dsa'
     })
 
@@ -750,36 +826,45 @@ function setTransport (args, cb) {
     })
   } else if (args.type === 'http') {
     transport = new HttpClient()
-    tim.ready().then(() => {
-      transport.setRootHash(tim.myRootHash())
+    state.timready().then(() => {
+      transport.setRootHash(state.timmyRootHash())
     })
   }
 
-  transport.on('message', tim.receiveMsg)
-  tim._send = transport.send.bind(transport)
+  transport.on('message', state.tim.receiveMsg)
+  state.tim_send = transport.send.bind(transport)
   cb()
 }
 
 function show (args, cb) {
-  if (!tim) {
+  if (!state.tim) {
     this.log('please run "setuser" first')
     return cb()
   }
 
-  tim.lookupObjectByCurHash(args.hash)
+  state.tim.lookupObjectByCurHash(args.hash)
     .then(obj => {
       obj = args.options.verbose ? obj : obj.parsed.data
       this.log(prettify(obj))
     })
-    .catch(err => this.log(err))
+    .catch(err => logErr.call(this, err))
     .then(() => cb())
 }
 
-function canSend (cb) {
-  let logger = this.log ? this : vorpal
-  if (!tim) {
+function checkLoggedIn () {
+  let logger = this && this.log ? this : vorpal
+  if (!state.tim) {
     logger.log('please run "setuser" first')
-  } else if (!tim._send) {
+  } else {
+    return true
+  }
+}
+
+function canSend () {
+  if (!checkLoggedIn()) return
+
+  let logger = this && this.log ? this : vorpal
+  if (!state.tim._send) {
     logger.log('please run "settransport" first')
   } else {
     return true
@@ -787,22 +872,51 @@ function canSend (cb) {
 }
 
 function lookupAndLog (info) {
-  tim.lookupObject(info)
+  state.tim.lookupObject(info)
     .then(obj => vorpal.log(prettify(obj.parsed.data)))
 }
 
 function setAlias (alias, identifier) {
-  let aliases = vorpal.localStorage.getItem('aliases') || '{}'
-  aliases = JSON.parse(aliases)
-  aliases[alias] = identifier
-  vorpal.localStorage.setItem('aliases', JSON.stringify(aliases))
+  state.preferences.aliases[alias] = identifier
+  savePreferences()
+}
+
+function savePreferences () {
+  fs.writeFile(getPreferencesPath(state.handle), prettify(preferences), (err) => {
+    vorpal.log('failed to safe preferences')
+  })
 }
 
 function getAlias (alias) {
   return getAliases()[alias]
 }
 
-function getAliases () {
-  let aliases = vorpal.localStorage.getItem('aliases') || '{}'
-  return JSON.parse(aliases)
+function getUserPath (handle) {
+  return path.resolve(getBasePath(), handle)
+}
+
+function getLogsPath (handle) {
+  return path.resolve(getUserPath(handle), 'logs')
+}
+
+function getIdentityPath (handle) {
+  return path.resolve(getUserPath(handle), 'pub.json')
+}
+
+function getKeysPath (handle) {
+  return path.resolve(getUserPath(handle), 'keys.json')
+}
+
+function getBasePath () {
+  return path.resolve(process.env.HOME, '.tradle')
+}
+
+function getPreferencesPath (handle) {
+  return path.resolve(getUserPath(handle), 'preferences.json')
+}
+
+function logErr (err) {
+  let logger = this && this.log ? this : vorpal || console
+  logger.log(err)
+  if (DEV) logger.log(err.stack)
 }

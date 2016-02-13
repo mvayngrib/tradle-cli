@@ -70,5 +70,7 @@ function findKey (keys, where) {
 }
 
 function getPrefix (identity) {
-  return identity.name.firstName.toLowerCase()
+  return identity.name
+    ? identity.name.firstName.toLowerCase()
+    : identity.pubkeys[0].fingerprint
 }
