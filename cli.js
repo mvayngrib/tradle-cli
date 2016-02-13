@@ -61,7 +61,9 @@ let storagePath
 let identity
 let keys
 let tim
+let currentMode
 let pargv = process.argv.slice(2)
+
 if (pargv.length) {
   // runDefault()
   setUser.call(vorpal, {
@@ -83,9 +85,11 @@ if (pargv.length) {
 vorpal
   .delimiter('tradle$')
   .history('tradle-cli')
-  .localStorage('tradle-cli')
   // .use(repl)
   .show()
+  .on('exitmode', function () {
+    currentMode = null
+  })
 
 vorpal
   .command('setuser <pathToIdentity> <pathToKeys>', 'Set acting identity')
@@ -271,11 +275,15 @@ vorpal
           results.push(data)
         }
       })
-      .on('error', (e) => err = e)
+      .on('error', (e) => {
+        err = e
+        this.log(err)
+        cb() // call here, might not get to 'end'
+      })
       .on('end', () => {
-        if (err) {
-          this.log(err)
-        } else if (!results.length) {
+        if (err) return
+
+        if (!results.length) {
           this.log('no results found')
         } else {
           // var table = new Table({
@@ -434,6 +442,51 @@ vorpal
       .then(() => setAlias(args.alias, args.identifier))
       .catch(err => this.log(err))
       .then(() => cb())
+  })
+
+vorpal
+  .command('aliases', 'list aliases')
+  .action(function (args, cb) {
+    this.log(prettify(getAliases()))
+    cb()
+  })
+
+let chattingWith // hack, need to figure out how to save state in mode
+vorpal
+  .mode('chat <identifier>')
+  .init(function (args, cb) {
+    currentMode = 'chat'
+
+    let id = args.identifier
+    findRecipient(id)
+      .then(recipient => {
+        chattingWith = toCoords(recipient)
+      })
+      .catch(err => this.log(err))
+      .then(() => cb())
+
+    tim.on('message', (info) => {
+      if (info[TYPE] === 'tradle.SimpleMessage') {
+        tim.lookupObject(info)
+          .then(obj => this.log('them: ' + obj.parsed.data.message))
+      }
+    })
+  })
+  .action(function (msg, cb) {
+    buildMsg({
+      [TYPE]: 'tradle.SimpleMessage',
+      message: msg
+    })
+    .then(buf => tim.sign(buf))
+    .then(signed => {
+      return tim.send({
+        msg: signed,
+        to: chattingWith,
+        deliver: true
+      })
+    })
+    .catch(err => this.log(err))
+    .then(() => cb())
   })
 
 vorpal
@@ -651,14 +704,20 @@ function setUser (args, cb) {
   tim.watchTxs(manualTxs)
   tim.on('error', (err) => vorpal.log(err))
   tim.on('message', (info) => {
-    vorpal.log(`received ${info[TYPE]} with hash: ${info[CUR_HASH]}`)
-    lookupAndLog(info)
+    if (!currentMode) {
+      vorpal.log(`received ${info[TYPE]} with hash: ${info[CUR_HASH]}`)
+      lookupAndLog(info)
+    }
   })
 
   tim.on('unchained', (info) => {
-    vorpal.log(`detected transaction sealing ${info[TYPE]} with hash: ${info[CUR_HASH]}`)
-    lookupAndLog(info)
+    if (!currentMode) {
+      vorpal.log(`detected transaction sealing ${info[TYPE]} with hash: ${info[CUR_HASH]}`)
+      lookupAndLog(info)
+    }
   })
+
+  vorpal.localStorage('tradle-cli-' + identity.pubkeys[0].fingerprint)
 
   cb()
 }
@@ -730,9 +789,17 @@ function lookupAndLog (info) {
 }
 
 function setAlias (alias, identifier) {
-  vorpal.localStorage.setItem('alias:' + alias, identifier)
+  let aliases = vorpal.localStorage.getItem('aliases') || '{}'
+  aliases = JSON.parse(aliases)
+  aliases[alias] = identifier
+  vorpal.localStorage.setItem('aliases', JSON.stringify(aliases))
 }
 
 function getAlias (alias) {
-  return vorpal.localStorage.getItem('alias:' + alias)
+  return getAliases()[alias]
+}
+
+function getAliases () {
+  let aliases = vorpal.localStorage.getItem('aliases') || '{}'
+  return JSON.parse(aliases)
 }
