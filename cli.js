@@ -465,12 +465,15 @@ vorpal
       .catch(err => this.log(err))
       .then(() => cb())
 
-    tim.on('message', (info) => {
+    tim.on('message', onMessage)
+    vorpal.once('exitmode', () => tim.removeListener('message', onMessage))
+
+    function onMessage(info) {
       if (info[TYPE] === 'tradle.SimpleMessage') {
         tim.lookupObject(info)
           .then(obj => this.log('them: ' + obj.parsed.data.message))
       }
-    })
+    }
   })
   .action(function (msg, cb) {
     buildMsg({

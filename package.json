@@ -16,7 +16,7 @@
     "@tradle/constants": "^1.2.8",
     "@tradle/http-keeper": "^3.1.1",
     "@tradle/identity": "^1.2.2",
-    "@tradle/otr": "^0.2.15",
+    "@tradle/otr": "^0.2.16",
     "@tradle/transport-http": "^1.0.0",
     "@tradle/utils": "^1.2.5",
     "@tradle/ws-client": "^1.4.1",
