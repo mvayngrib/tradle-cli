@@ -12,6 +12,7 @@ const find = require('array-find')
 const Q = require('bluebird-q')
 const bs58check = require('bs58check')
 const vorpal = require('vorpal')()
+const chalk = vorpal.chalk
 // const repl = require('vorpal-repl')
 const mkdirp = require('mkdirp')
 const Table = require('cli-table')
@@ -524,6 +525,8 @@ vorpal
 vorpal
   .command('aliases', 'list aliases')
   .action(function (args, cb) {
+    if (!checkLoggedIn()) return cb()
+
     this.log(prettify(state.preferences.aliases))
     cb()
   })
@@ -532,9 +535,13 @@ let chattingWith // hack, need to figure out how to save state in mode
 vorpal
   .mode('chat <identifier>')
   .init(function (args, cb) {
+    if (!canSend.call(this)) {
+      cb(new Error('no user set'))
+      return vorpal.exec('exit')
+    }
+
     state.currentMode = 'chat'
 
-    this.foo = 'hey'
     let id = args.identifier
     findRecipient(id)
       .then(recipient => {
@@ -543,15 +550,15 @@ vorpal
       .catch(err => logErr.call(this, err))
       .then(() => cb())
 
-    state.tim.on('message', onMessage)
-    vorpal.once('exitmode', () => state.tim.removeListener('message', onMessage))
-
-    function onMessage(info) {
+    let onMessage = (info) => {
       if (info[TYPE] === 'tradle.SimpleMessage') {
         state.tim.lookupObject(info)
           .then(obj => this.log('them: ' + obj.parsed.data.message))
       }
     }
+
+    state.tim.on('message', onMessage)
+    vorpal.once('exitmode', () => state.tim.removeListener('message', onMessage))
   })
   .action(function (msg, cb) {
     buildMsg({
@@ -784,18 +791,22 @@ function setUser (args, cb) {
   state.tim.watchTxs(manualTxs)
   state.tim.on('error', (err) => vorpal.log(err))
   state.tim.on('message', (info) => {
-    if (!currentMode) {
+    if (!state.currentMode) {
       vorpal.log(`received ${info[TYPE]} with hash: ${info[CUR_HASH]}`)
       lookupAndLog(info)
     }
   })
 
   state.tim.on('unchained', (info) => {
-    if (!currentMode) {
+    if (!state.currentMode) {
       vorpal.log(`detected transaction sealing ${info[TYPE]} with hash: ${info[CUR_HASH]}`)
       // lookupAndLog(info)
     }
   })
+
+  if (state.preferences.transport) {
+    setTransport(state.preferences.transport, noop)
+  }
 
   // vorpal.localStorage('tradle-cli-' + identity.pubkeys[0].fingerprint)
   cb()
@@ -832,7 +843,9 @@ function setTransport (args, cb) {
   }
 
   transport.on('message', state.tim.receiveMsg)
-  state.tim_send = transport.send.bind(transport)
+  state.tim._send = transport.send.bind(transport)
+  state.preferences.transport = args
+  savePreferences()
   cb()
 }
 
@@ -842,7 +855,9 @@ function show (args, cb) {
     return cb()
   }
 
-  state.tim.lookupObjectByCurHash(args.hash)
+  let hash = args.hash
+  this.log(`Looking up object with hash ${hash}`)
+  state.tim.lookupObjectByCurHash(hash)
     .then(obj => {
       obj = args.options.verbose ? obj : obj.parsed.data
       this.log(prettify(obj))
@@ -882,13 +897,16 @@ function setAlias (alias, identifier) {
 }
 
 function savePreferences () {
-  fs.writeFile(getPreferencesPath(state.handle), prettify(preferences), (err) => {
-    vorpal.log('failed to safe preferences')
+  fs.writeFile(getPreferencesPath(state.handle), prettify(state.preferences), (err) => {
+    if (!err) return
+
+    vorpal.log('failed to safe preferences:')
+    vorpal.log(err)
   })
 }
 
 function getAlias (alias) {
-  return getAliases()[alias]
+  return state.preferences.aliases[alias]
 }
 
 function getUserPath (handle) {
