@@ -21,6 +21,4 @@ ADD . /opt/app
 # after leveldown prebuild script stops failing
 # ENV NODE_ENV production
 
-ENV HOME /home
-
 CMD ["node", "cli.js"]
