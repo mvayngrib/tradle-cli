@@ -110,11 +110,11 @@ vorpal
 
     this.log(`Generating a really good ${handle}. This may take a few seconds...`)
 
+    let userPath = getUserPath(handle)
     Q.nfcall(genUser, {
       networkName: NETWORK_NAME
     })
     .then((user) => {
-      let userPath = getUserPath(handle)
       mkdirp.sync(userPath)
       mkdirp.sync(getLogsPath(handle))
       return Q.all([
@@ -779,7 +779,6 @@ function setUser (args, cb) {
       })
   }
 
-  logger.log(`Initializing ${state.handle}'s session...`)
   let handle = state.handle = args.handle
   let userPath = getUserPath(handle)
   let iPath = getIdentityPath(handle)
