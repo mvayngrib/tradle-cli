@@ -2107,9 +2107,8 @@
       "resolved": "https://registry.npmjs.org/strip-ansi/-/strip-ansi-3.0.0.tgz"
     },
     "tim": {
-      "version": "5.4.1",
-      "from": "tradle/tim#watchAddr",
-      "resolved": "git://github.com/tradle/tim.git#a5e95b73ec1b74a8148afb1543bda83333a2efb6",
+      "version": "6.0.0",
+      "from": "tim@latest",
       "dependencies": {
         "@tradle/bitjoe-js": {
           "version": "1.0.3",
