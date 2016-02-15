@@ -8,7 +8,7 @@ Note: this is a work in progress and is rough around the edges. Bug reports, iss
 ## Installation
 
 ```bash
-npm i -g @tradle/cli # `sudo npm i -g @tradle/cli` depending on your setup
+npm i -g @tradle/cli # you might need `sudo` depending on your setup
 ```
 
 ## Commands (copied & pasted from output of `help` command):
@@ -53,35 +53,6 @@ Sample session:
 #                                             Welcome to Tradle!                                                  #
 #                                                                                                                 #
 ###################################################################################################################
-
-tradle$
-
-  Commands:
-
-    help [command...]                Provides help for a given command.
-    exit [options]                   Exit Tradle command line client. Please run `stop` first
-    setuser <handle>                 Set acting identity
-    newuser <handle>                 Create a new identity
-    ls-users                         List users
-    settransport <type> <serverUrl>  Set transport: "ws" or "http"
-    meet <identifier>                Introduce yourself to a stranger
-    simplemsg <identifier>           Send a tradle.SimpleMessage to someone
-    msg <identifier>                 Send a message to someone
-    ls [options]                     List stored objects
-    show-obj [options] <hash>        Print a stored object
-    ls-txs                           List tracked txs
-    show-tx <txId>                   Show information stored about transaction
-    watchTx <hash>                   Watch a blockchain transaction
-    watchAddr <address>              Watch a blockchain address
-    forget <identifier>              Forget someone (wipe all history with them)
-    stop                             Call this before exiting to give things a chance to clean up nicely
-    whoami                           Print your identity
-    alias <alias> <identifier>       Create an alias for a contact
-    aliases                          list aliases
-    chat <identifier>                Enter chat mode
-    balance                          Check balance
-    whereami                         Get the path to your Tradle user directory
-
 
 tradle$ ls-users
 # no users found
