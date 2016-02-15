@@ -314,7 +314,7 @@ vorpal
     //   colWidths.unshift(20)
     // }
 
-    state.tim.decryptedMessagesStream()
+    state.tim.messages().createValueStream()
       .on('data', data => {
         if (!types || types.includes(data[TYPE])) {
           results.push(data)
