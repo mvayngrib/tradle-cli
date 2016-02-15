@@ -95,6 +95,8 @@ vorpal
     state.currentMode = null
   })
 
+setTimeout(() => vorpal.exec('help'), 100)
+
 vorpal
   .command('setuser <handle>', 'Set acting identity')
   .action(setUser)
@@ -177,7 +179,7 @@ vorpal
   })
 
 vorpal
-  .command('simplemsg <identifier>', 'Send a message to someone')
+  .command('simplemsg <identifier>', 'Send a tradle.SimpleMessage to someone')
   // .option('-m, --message', 'Message text')
   // .option('-s, --sign', 'Sign the message (yes)')
   .help(IDENTIFIER_EXPLANATION)
@@ -293,8 +295,8 @@ vorpal
   // })
 
 vorpal
-  .command('ls', 'List stored resources')
-  .option('-t, --type', 'Limit resources by type, e.g. tradle.Identity')
+  .command('ls', 'List stored objects')
+  .option('-t, --type', 'Limit objects by type, e.g. tradle.Identity')
   .action(function (args, cb) {
     if (!state.tim) {
       this.log('please run "setuser" first')
@@ -347,7 +349,7 @@ vorpal
           //   ])
           // })
 
-          this.log('Tip: use `show <hash>` to get full metadata')
+          this.log('Tip: use `show-obj -v <hash>` to get full metadata')
           var table = new Table({
             head: ['Type', 'Hash'],
             colWidths: [45, 45]
@@ -395,7 +397,7 @@ vorpal
   })
 
 vorpal
-  .command('show-tx <txId>', 'Show transaction')
+  .command('show-tx <txId>', 'Show information stored about transaction')
   .action(function (args, cb) {
     if (!checkLoggedIn()) return cb()
 
@@ -612,7 +614,12 @@ vorpal
     }
 
     this.log(`Command "${command}" not found. Looking up object with hash "${command}"`)
-    return show.call(this, { hash: command }, cb)
+    return show.call(this, {
+      hash: command,
+      options: {
+        verbose: true
+      }
+    }, cb)
   })
 
 vorpal
