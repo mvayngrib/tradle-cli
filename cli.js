@@ -580,11 +580,34 @@ vorpal
   })
 
 vorpal
+  .command('balance', 'Check balance')
+  .action(function (args, cb) {
+    if (!checkLoggedIn.call(this)) return cb()
+
+    state.tim.wallet.balance((err, balance) => {
+      if (err) return this.log('Failed to check balance: ' + err.message)
+
+      this.log('Address: ' + state.tim.wallet.addressString)
+      this.log('Balance: ' + balance + ' satoshis')
+      cb()
+    })
+  })
+
+vorpal
+  .command('whereami', 'Get the path to your Tradle user directory')
+  .action(function (args, cb) {
+    if (!checkLoggedIn.call(this)) return cb()
+
+    this.log(getUserPath(state.handle))
+    cb()
+  })
+
+vorpal
   .catch('[command]', 'Look up object')
-  .action(function (args, callback) {
+  .action(function (args, cb) {
     let command = args.command
     this.log(`Command "${command}" not found. Looking up object with hash "${command}"`)
-    return show(args, callback)
+    return show(args, cb)
   })
 
 vorpal
