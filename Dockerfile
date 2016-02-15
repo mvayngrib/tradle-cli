@@ -9,6 +9,7 @@ RUN mkdir -p /opt/app
 WORKDIR /opt/app
 
 ADD package.json npm-shrinkwrap.json /opt/app/
+RUN npm config set registry https://registry.npmjs.org/
 RUN cd /opt/app && npm install
 
 # From here we load our application's code in, therefore the previous docker
@@ -20,4 +21,4 @@ ADD . /opt/app
 # after leveldown prebuild script stops failing
 # ENV NODE_ENV production
 
-CMD ["node", "./cli.js"]
+CMD ["node", "cli.js"]

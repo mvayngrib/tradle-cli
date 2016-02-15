@@ -123,7 +123,7 @@ vorpal
         Q.ninvoke(fs, 'writeFile', getPreferencesPath(handle), prettify({ aliases: {} }))
       ])
     })
-    .then(() => this.log(`Generated new user: ${handle}`))
+    .then(() => this.log(`Generated new user "${handle}" in ${userPath}`))
     .catch(err => logErr.call(this, err))
     .then(() => cb())
   })
@@ -606,8 +606,13 @@ vorpal
   .catch('[command]', 'Look up object')
   .action(function (args, cb) {
     let command = args.command
+    if (!state.tim) {
+      this.log(`Command "${command}" not found.`)
+      return cb()
+    }
+
     this.log(`Command "${command}" not found. Looking up object with hash "${command}"`)
-    return show(args, cb)
+    return show.call(this, { hash: command }, cb)
   })
 
 vorpal
@@ -764,7 +769,9 @@ function sendMsg (opts) {
 
 function setUser (args, cb) {
   cb = cb || noop
+  let logger = getLogger(this)
   if (state.tim) {
+    logger.log(`Terminating ${state.handle}'s session...`)
     return state.tim.destroy()
       .then(() => {
         state.tim = null
@@ -772,6 +779,7 @@ function setUser (args, cb) {
       })
   }
 
+  logger.log(`Initializing ${state.handle}'s session...`)
   let handle = state.handle = args.handle
   let userPath = getUserPath(handle)
   let iPath = getIdentityPath(handle)
@@ -838,6 +846,7 @@ function setUser (args, cb) {
   }
 
   // vorpal.localStorage('tradle-cli-' + identity.pubkeys[0].fingerprint)
+  logger.log(`Initializing Tradle client...`)
   cb()
 }
 
@@ -879,6 +888,7 @@ function setTransport (args, cb) {
 }
 
 function show (args, cb) {
+  let logger = getLogger(this)
   if (!state.tim) {
     this.log('please run "setuser" first')
     return cb()
@@ -895,7 +905,7 @@ function show (args, cb) {
 }
 
 function checkLoggedIn () {
-  let logger = this && this.log ? this : vorpal
+  let logger = getLogger(this)
   if (!state.tim) {
     logger.log('please run "setuser" first')
   } else {
@@ -962,7 +972,11 @@ function getPreferencesPath (handle) {
 }
 
 function logErr (err) {
-  let logger = this && this.log ? this : vorpal || console
+  let logger = getLogger(this)
   logger.log(err)
   if (DEV) logger.log(err.stack)
+}
+
+function getLogger (obj) {
+  return obj && obj.log ? obj : vorpal || console
 }
