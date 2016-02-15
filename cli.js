@@ -146,7 +146,7 @@ vorpal
   .action(setTransport)
 
 vorpal
-  .command('contact <identifier>', 'Call a stranger')
+  .command('meet <identifier>', 'Introduce yourself to a stranger')
   .help(IDENTIFIER_EXPLANATION)
   .action(function (args, cb) {
     let opts = { deliver: true, public: true }
@@ -486,7 +486,10 @@ vorpal
 vorpal
   .command('whoami', 'Print your identity')
   .action(function (args, cb) {
-    if (!state.tim) return cb()
+    if (!state.tim) {
+      this.log('You\'re absolutely wonderful! But you probably want to run "setuser"')
+      return cb()
+    }
 
     // return show.call(this, { hash: tim.myCurrentHash() }, cb)
     // tim.lookupObjectByCurHash(tim.myCurrentHash())
@@ -505,7 +508,6 @@ vorpal
 //   .option('-n', 'Lines to output')
 //   .option('-f', 'Follow')
 //   .action(function (args, cb) {
-
 //   })
 
 vorpal
@@ -533,7 +535,7 @@ vorpal
 
 let chattingWith // hack, need to figure out how to save state in mode
 vorpal
-  .mode('chat <identifier>')
+  .mode('chat <identifier>', 'Enter chat mode')
   .init(function (args, cb) {
     if (!canSend.call(this)) {
       cb(new Error('no user set'))
@@ -578,8 +580,12 @@ vorpal
   })
 
 vorpal
-  .catch('[hash]', 'Look up object')
-  .action(show)
+  .catch('[command]', 'Look up object')
+  .action(function (args, callback) {
+    let command = args.command
+    this.log(`Command "${command}" not found. Looking up object with hash "${command}"`)
+    return show(args, callback)
+  })
 
 vorpal
   .find('exit')
@@ -856,7 +862,6 @@ function show (args, cb) {
   }
 
   let hash = args.hash
-  this.log(`Looking up object with hash ${hash}`)
   state.tim.lookupObjectByCurHash(hash)
     .then(obj => {
       obj = args.options.verbose ? obj : obj.parsed.data
