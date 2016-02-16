@@ -616,9 +616,7 @@ vorpal
     this.log(`Command "${command}" not found. Looking up object with hash "${command}"`)
     return show.call(this, {
       hash: command,
-      options: {
-        verbose: true
-      }
+      options: {}
     }, cb)
   })
 
