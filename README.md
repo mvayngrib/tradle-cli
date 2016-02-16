@@ -1,6 +1,8 @@
 
 # tradle-cli
 
+Command line client for Tradle
+
 *This module is part of the [Tradle](http://github.com/tradle/tim) project*
 
 Note: this is a work in progress and is rough around the edges. Bug reports, issues and pull requests are welcome!
