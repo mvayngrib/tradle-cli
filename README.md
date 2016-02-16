@@ -9,6 +9,22 @@ Note: this is a work in progress and is rough around the edges. Bug reports, iss
 
 ## Installation
 
+#### Dockerized
+
+Create a data volume container (first time only): 
+
+```bash
+docker create -v /tdata --name tradle-cli-data cogniteev/echo
+```
+
+Run the tradle-cli container:
+
+```bash
+docker run -it --rm --name tradle-cli -e "HOME=/tdata" --volumes-from tradle-cli-data tradle/cli:1.0.0
+```
+
+#### Directly on host
+
 ```bash
 npm i -g @tradle/cli # you might need `sudo` depending on your setup
 ```
@@ -44,6 +60,10 @@ tradle$
     balance                          Check balance
     whereami                         Get the path to your Tradle user directory
 ```
+
+## Logs
+
+Logs are stored per user. Use the `whereami` command to get the user directory, and logs will be under it.
 
 ## Usage
 

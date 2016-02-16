@@ -122,7 +122,7 @@ vorpal
       return Q.all([
         Q.ninvoke(fs, 'writeFile', getIdentityPath(handle), prettify(user.pub)),
         Q.ninvoke(fs, 'writeFile', getKeysPath(handle), prettify(user.priv)),
-        Q.ninvoke(fs, 'writeFile', getPreferencesPath(handle), prettify({ aliases: {} }))
+        Q.ninvoke(fs, 'writeFile', getPreferencesPath(handle), prettify(newPreferences()))
       ])
     })
     .then(() => this.log(`Generated new user "${handle}" in ${userPath}`))
@@ -151,6 +151,8 @@ vorpal
   .command('meet <identifier>', 'Introduce yourself to a stranger')
   .help(IDENTIFIER_EXPLANATION)
   .action(function (args, cb) {
+    if (!canSend.call(this)) return cb()
+
     let opts = { deliver: true, public: true }
 
     findRecipient(args.identifier)
@@ -792,22 +794,22 @@ function setUser (args, cb) {
   try {
     state.identity = require(iPath)
   } catch (err) {
-    this.log(err.message)
+    this.log('User not found')
     return cb()
   }
 
   try {
     state.keys = require(kPath)
   } catch (err) {
-    this.log(err.message)
+    this.log('User not found')
     return cb()
   }
 
   try {
     state.preferences = require(pPath)
   } catch (err) {
-    this.log(err.message)
-    return cb()
+    this.log('Preferences not found')
+    state.preferences = newPreferences()
   }
 
   let logsPath = getLogsPath(handle)
@@ -983,4 +985,10 @@ function logErr (err) {
 
 function getLogger (obj) {
   return obj && obj.log ? obj : vorpal || console
+}
+
+function newPreferences () {
+  return {
+    aliases: {}
+  }
 }
