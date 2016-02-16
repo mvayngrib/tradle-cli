@@ -20,7 +20,7 @@ docker create -v /tdata --name tradle-cli-data cogniteev/echo
 Run the tradle-cli container:
 
 ```bash
-docker run -it --rm --name tradle-cli -e "HOME=/tdata" --volumes-from tradle-cli-data tradle/cli:1.0.0
+docker run -it --rm --name tradle-cli -e "HOME=/tdata" --volumes-from tradle-cli-data tradle/cli:dev
 ```
 
 #### Directly on host
