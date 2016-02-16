@@ -589,7 +589,10 @@ vorpal
     if (!checkLoggedIn.call(this)) return cb()
 
     state.tim.wallet.balance((err, balance) => {
-      if (err) return this.log('Failed to check balance: ' + err.message)
+      if (err) {
+        this.log('Failed to check balance: ' + err.message)
+        return cb()
+      }
 
       this.log('Address: ' + state.tim.wallet.addressString)
       this.log('Balance: ' + balance + ' satoshis')
