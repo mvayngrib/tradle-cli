@@ -25,7 +25,9 @@ const ROOT_HASH = constants.ROOT_HASH
 const CUR_HASH = constants.CUR_HASH
 const SIG = constants.SIG
 const buildNode = require('./buildNode')
-const genUser = require('./genUser')
+const cliUtils = require('@tradle/cli-utils')
+const genUser = cliUtils.genUser
+const prettify = cliUtils.toJSONForConsole
 const DEV = true//process.env.NODE_ENV === 'development'
 const NETWORK_NAME = 'testnet'
 const noop = () => {}
@@ -34,11 +36,12 @@ Debug.log = noop // initially
 
 module.exports = {
   cli: vorpal,
-  genUser,
-  getUserIdentity,
-  prettify,
-  getLogger,
-  logErr
+  // getUserIdentityPath: getIdentityPath,
+  // genUser,
+  // getUserIdentity,
+  // prettify,
+  // getLogger,
+  // logErr
 }
 
 let selfDestructing
@@ -648,28 +651,6 @@ function printIdentityPublishStatus (tim) {
     })
 }
 
-function prettify (obj) {
-  return JSON.stringify(obj, prettifyReplacer, 2)
-}
-
-function prettifyReplacer (key, val) {
-  if (Buffer.isBuffer(val)) {
-    return val.toString('hex')
-  }
-
-  if (val == null) return val
-
-  if (Object.keys(val).length === 2 && val.type === 'Buffer' && Array.isArray(val.data)) {
-    return prettifyReplacer(key, new Buffer(val.data))
-  }
-
-  if (typeof val === 'object') {
-    return val
-  }
-
-  return val
-}
-
 function findRecipient (identifier) {
   identifier = getAlias(identifier) || identifier
   return Q.allSettled([
@@ -818,18 +799,21 @@ function setUser (args, cb) {
       })
   }
 
+  let handle = args.handle
   let userInfo
   try {
-    userInfo = getUserInfo(args.handle)
+    userInfo = getUserInfo(handle)
   } catch (err) {
     this.log('User not found')
     return cb()
   }
 
-  for (p in userInfo) {
+  for (let p in userInfo) {
     state[p] = userInfo[p]
   }
 
+  state.handle = handle
+  const userPath = getUserPath(handle)
   const logsPath = getLogsPath(handle)
   const logPath = path.join(logsPath, 'debug-' + Date.now() + '.log')
   const logStream = fs.createWriteStream(logPath, {'flags': 'a'})
