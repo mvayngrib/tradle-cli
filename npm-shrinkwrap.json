@@ -1,6 +1,6 @@
 {
   "name": "@tradle/cli",
-  "version": "1.1.4",
+  "version": "1.2.0",
   "dependencies": {
     "@tradle/bitcoinjs-lib": {
       "version": "1.6.0",
