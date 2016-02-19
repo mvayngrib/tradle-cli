@@ -851,7 +851,7 @@ function setUser (args, cb) {
 
   state.tim.on('unchained', (info) => {
     if (!state.currentMode) {
-      vorpal.log(`detected transaction sealing ${info[TYPE]} with hash: ${info[CUR_HASH]}`)
+      vorpal.log(`detected tx ${info.txId} sealing ${info[TYPE]} with hash ${info[CUR_HASH]}`)
       // lookupAndLog(info)
     }
   })
