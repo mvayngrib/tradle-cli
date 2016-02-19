@@ -63,10 +63,14 @@ let cleanup = (err) => {
   }
 }
 
-process.on('uncaughtException', cleanup)
-process.on('exit', cleanup)
-process.on('SIGINT', cleanup)
-process.on('SIGTERM', cleanup)
+process.on('uncaughtException', err => {
+  debug(err.message, err.stack)
+})
+
+// process.on('uncaughtException', cleanup)
+// process.on('exit', cleanup)
+// process.on('SIGINT', cleanup)
+// process.on('SIGTERM', cleanup)
 
 const BANNER =
 "\n###################################################################################################################\n" +
@@ -89,9 +93,14 @@ const manualTxs = [
   '235f8ffd7a3f5ecd5de3408cfaad0d01a36a96195ff491850257bc5c3098b28b'
 ]
 
-console.log(BANNER)
-
 let state = {}
+
+const showCli = vorpal.show
+vorpal.show = function () {
+  console.log(BANNER)
+  setTimeout(() => vorpal.exec('help'), 100)
+  return showCli.apply(vorpal, arguments)
+}
 
 vorpal
   .delimiter('tradle$')
@@ -100,8 +109,6 @@ vorpal
   .on('exitmode', function () {
     state.currentMode = null
   })
-
-setTimeout(() => vorpal.exec('help'), 100)
 
 vorpal
   .command('setuser <handle>', 'Set acting identity')
