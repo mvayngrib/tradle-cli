@@ -890,8 +890,8 @@ function setTransport (args, cb) {
     })
   } else if (args.type === 'http') {
     transport = new HttpClient()
-    state.timready().then(() => {
-      transport.setRootHash(state.timmyRootHash())
+    state.tim.ready().then(() => {
+      transport.setRootHash(state.tim.myRootHash())
     })
   }
 
