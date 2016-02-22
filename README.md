@@ -9,6 +9,8 @@ Note: this is a work in progress and is rough around the edges. Bug reports, iss
 
 ## Installation
 
+Note: the below installations currently use private docker images and npm modules, so send an email to mark@tradle.io if you need access.
+
 #### Dockerized
 
 Create a data volume container (first time only): 
