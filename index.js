@@ -888,15 +888,21 @@ function setTransport (args, cb) {
       url: serverUrl,
       otrKey: DSA.parsePrivate(otrKey.priv)
     })
+
+    state.tim._send = transport.send.bind(transport)
   } else if (args.type === 'http') {
     transport = new HttpClient()
     state.tim.ready().then(() => {
       transport.setRootHash(state.tim.myRootHash())
     })
+
+    state.tim._send = function (rootHash, msg, recipientInfo) {
+      transport.addRecipient(rootHash, serverUrl)
+      return transport.send.apply(transport, arguments)
+    }
   }
 
   transport.on('message', state.tim.receiveMsg)
-  state.tim._send = transport.send.bind(transport)
   state.preferences.transport = args
   savePreferences()
   cb()
