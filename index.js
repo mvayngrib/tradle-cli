@@ -449,7 +449,6 @@ vorpal
     }
 
     state.tim.watchTxs(args.hash)
-    state.tim.sync()
     cb()
   })
 
