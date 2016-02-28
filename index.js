@@ -4,8 +4,11 @@ const fs = require('fs')
 const path = require('path')
 // const spawn = require('child_process').spawn
 const find = require('array-find')
+const request = require('superagent')
+const writeFile = require('write-file-atomic')
 const Q = require('bluebird-q')
 const bs58check = require('bs58check')
+const deepExtend = require('deep-extend')
 const vorpal = require('vorpal')()
 const chalk = vorpal.chalk
 // const repl = require('vorpal-repl')
@@ -18,6 +21,7 @@ const constants = require('@tradle/constants')
 const Identity = require('@tradle/identity').Identity
 const DSA = require('@tradle/otr').DSA
 const Builder = require('@tradle/chained-obj').Builder
+const tradleUtils = require('@tradle/utils')
 const WebSocketClient = require('@tradle/ws-client')
 const HttpClient = require('@tradle/transport-http').HttpClient
 const TYPE = constants.TYPE
@@ -133,9 +137,9 @@ vorpal
       mkdirp.sync(userPath)
       mkdirp.sync(getLogsPath(handle))
       return Q.all([
-        Q.ninvoke(fs, 'writeFile', getIdentityPath(handle), prettify(user.pub)),
-        Q.ninvoke(fs, 'writeFile', getKeysPath(handle), prettify(user.priv)),
-        Q.ninvoke(fs, 'writeFile', getPreferencesPath(handle), prettify(newPreferences()))
+        Q.ninvoke(writeFile, getIdentityPath(handle), prettify(user.pub)),
+        Q.ninvoke(writeFile, getKeysPath(handle), prettify(user.priv)),
+        Q.ninvoke(writeFile, getPreferencesPath(handle), prettify(newPreferences()))
       ])
     })
     .then(() => this.log(`Generated new user "${handle}" in ${userPath}`))
@@ -156,9 +160,9 @@ vorpal
     cb()
   })
 
-vorpal
-  .command('settransport <type> <serverUrl>', 'Set transport: "ws" or "http"')
-  .action(setTransport)
+// vorpal
+//   .command('settransport <type> <serverUrl>', 'Set transport: "ws" or "http"')
+//   .action(setTransport)
 
 vorpal
   .command('meet <identifier>', 'Introduce yourself to a stranger')
@@ -641,6 +645,72 @@ vorpal
   .find('exit')
   .description('Exit Tradle command line client. Please run `stop` first')
 
+vorpal
+  .command('addserver <url>', 'add a Tradle server url, and the providers running there')
+  .action(function (args, cb) {
+    if (!checkLoggedIn()) return cb()
+
+    const url = args.url.replace(/\/$/, '') // trim trailing slash
+    const providers = state.preferences.providers
+
+    Q.Promise((resolve, reject) => {
+        request
+          .get(url + '/info')
+          .end((err, res) => {
+            if (err) return reject(err)
+
+            resolve(res)
+          })
+      })
+      .then(res => {
+        // TODO:
+        // rm settransport
+        // add ls-contacts
+        // add txs to watch
+        return Q.allSettled(res.body.providers.map(p => {
+          p.baseUrl = url
+          const saved = providers[p]
+          if (!saved || saved.baseUrl === url) {
+            providers[p.id] = p
+          }
+
+          const bot = p.bot
+          if (!bot) return
+
+          state.tim.addContactIdentity(bot.pub)
+          return Builder()
+            .data(bot.pub)
+            .build()
+            .then(buf => {
+              return Q.ninvoke(tradleUtils, 'getStorageKeyFor', buf)
+            })
+            .then(hash => {
+              return bot[CUR_HASH] = hash.toString('hex')
+            })
+        }))
+        .then(results => {
+          if (results.some(r => r.value)) {
+            savePreferences()
+          }
+        })
+      })
+      .catch(err => logErr.call(this, err))
+      .then(() => cb())
+  })
+
+// vorpal
+//   .action('ls-contacts', 'List contacts')
+//   .command(function (args, cb) {
+//     if (!checkLoggedIn()) return cb()
+
+//     const providers = state.preferences.providers
+//     const bots = Object.keys(providers)
+//       .filter(id => getProviderHash(providers[id]))
+//       .map(id => providers[id].bot)
+
+//     this.log(bots.join('\n'))
+//   })
+
 function printIdentityPublishStatus (tim) {
   return tim.identityPublishStatus()
     .then((status) => {
@@ -661,6 +731,7 @@ function findRecipient (identifier) {
   identifier = getAlias(identifier) || identifier
   return Q.allSettled([
     state.tim.lookupIdentity({ fingerprint: identifier }),
+    state.tim.lookupIdentity({ [CUR_HASH]: identifier }),
     state.tim.lookupIdentity({ [ROOT_HASH]: identifier })
   ])
   .then(results => {
@@ -784,7 +855,9 @@ function getUserInfo (handle) {
   }
 
   try {
-    userInfo.preferences = require(pPath)
+    // deep extend on init in case we add
+    // new default properties as time goes on
+    userInfo.preferences = deepExtend(newPreferences(), require(pPath))
   } catch (err) {
     if (this.log) this.log('Preferences not found')
     userInfo.preferences = newPreferences()
@@ -830,7 +903,7 @@ function setUser (args, cb) {
     logStream.write(str)
   }
 
-  state.tim = buildNode({
+  const tim = state.tim = buildNode({
     pathPrefix: path.resolve(userPath, 'tim'),
     networkName: NETWORK_NAME,
     identity: Identity.fromJSON(state.identity),
@@ -839,72 +912,158 @@ function setUser (args, cb) {
     afterBlockTimestamp: constants.afterBlockTimestamp
   })
 
-  state.tim.watchTxs(manualTxs)
-  state.tim.on('error', (err) => vorpal.log(err))
-  state.tim.on('message', (info) => {
+  tim.watchTxs(manualTxs)
+  tim.on('error', (err) => vorpal.log(err))
+  tim.on('message', (info) => {
     if (!state.currentMode) {
       vorpal.log(`received ${info[TYPE]} with hash: ${info[CUR_HASH]}`)
       lookupAndLog(info)
     }
   })
 
-  state.tim.on('unchained', (info) => {
+  tim.on('unchained', (info) => {
     if (!state.currentMode) {
       vorpal.log(`detected tx ${info.txId} sealing ${info[TYPE]} with hash ${info[CUR_HASH]}`)
       // lookupAndLog(info)
     }
   })
 
-  if (state.preferences.transport) {
-    setTransport(state.preferences.transport, noop)
+  const transports = {}
+  tim._send = function (recipientHash /* ... */) {
+    let transport = transports[recipientHash]
+    if (transport) return transport.send.apply(transport, arguments)
+
+    const providers = state.preferences.providers
+    const id = find(Object.keys(providers), id => {
+      return providers[id].bot[CUR_HASH] === recipientHash
+    })
+
+    if (!id) {
+//       logErr(new Error('no transport for recipient: ' + recipientHash))
+      return Q.reject(new Error('no transport for recipient'))
+    }
+
+    const provider = providers[id]
+    const url = `${provider.baseUrl}/${provider.id}/ws`
+    const otrKey = find(state.keys, (k) => {
+      return k.type === 'dsa'
+    })
+
+    transport = new WebSocketClient({
+      url: url,
+      otrKey: DSA.parsePrivate(otrKey.priv)
+    })
+
+    transports[recipientHash] = transport
+    // rootHashToClient[provider[ROOT_HASH]] = transport
+    transport.on('message', tim.receiveMsg)
+    return tim._send.apply(this, arguments)
   }
+
+  tim.once('destroy', () => {
+    for (let hash in transports) {
+      transports[hash].destroy()
+    }
+  })
+
+  // attachTransport()
+  // if (state.preferences.transport) {
+  //   setTransport(state.preferences.transport, noop)
+  // }
 
   // vorpal.localStorage('tradle-cli-' + identity.pubkeys[0].fingerprint)
   logger.log(`Initializing Tradle client...`)
   cb()
+
+  function getTransport (rootHash) {
+
+  }
 }
 
-function setTransport (args, cb) {
-  cb = cb || noop
-  if (!state.tim) {
-    this.log('please run "setuser" first')
-    return cb()
-  }
+// function attachTransport (cb) {
+//   cb = cb || noop
+//   const tim = state.tim
+//   if (!tim) {
+//     this.log('please run "setuser" first')
+//     return cb()
+//   }
 
-  let serverUrl = args.serverUrl
-  let transport
-  if (args.type === 'ws') {
-    let otrKey = find(state.keys, (k) => {
-      return k.type === 'dsa'
-    })
+//   if (state.transport) {
+//     state.transport.forEach(t => {
+//       t.removeListener('message', tim.receiveMsg)
+//     })
 
-    if (!otrKey) {
-      this.log('no OTR key found')
-      return cb()
+//     state.transport.length = 0
+//   }
+
+//   const providers = state.preferences.providers
+//   const rootHashToClient = {}
+//   return loadProviderIdentities()
+//     .then(() => {
+//       Object.keys(providers)
+//       .filter(id => getProviderHash(providers[id]))
+//       .forEach(id => {
+//         const provider = providers[id]
+//         const otrKey = find(state.keys, (k) => {
+//           return k.type === 'dsa'
+//         })
+
+//         const transport = new WebSocketClient({
+//           url: `${provider.baseUrl}/${id}/ws`,
+//           otrKey: DSA.parsePrivate(otrKey.priv)
+//         })
+
+//         rootHashToClient[provider[ROOT_HASH]] = transport
+//         transport.on('message', tim.receiveMsg)
+//       })
+
+//       tim._send = function (rootHash) {
+//         const transport = rootHashToClient[rootHash]
+//         if (transport) return transport.send.apply(transport, arguments)
+
+//         throw new Error('no transport found')
+//       }
+//     })
+
+//   // } else if (args.type === 'http') {
+//   //   transport = new HttpClient()
+//   //   state.tim.ready().then(() => {
+//   //     transport.setRootHash(state.tim.myRootHash())
+//   //   })
+
+//   //   state.tim._send = function (rootHash, msg, recipientInfo) {
+//   //     transport.addRecipient(rootHash, serverUrl)
+//   //     return transport.send.apply(transport, arguments)
+//   //   }
+//   // }
+
+//   // state.preferences.transport = args
+//   savePreferences()
+//   cb()
+// }
+
+function loadProviderIdentities () {
+  const providers = state.preferences.providers
+  return Q.allSettled(Object.keys(providers).map(id => {
+    const provider = providers[id]
+    if (provider[ROOT_HASH]) return
+
+    return lookup(provider)
+  }))
+  .then(results => {
+    if (results.some(r => r.value)) {
+      savePreferences()
     }
+  })
 
-    transport = new WebSocketClient({
-      url: serverUrl,
-      otrKey: DSA.parsePrivate(otrKey.priv)
-    })
+  function lookup (provider) {
+    const txId = provider.bot.txId
+    if (!txId) return Q.reject(new Error('provider bot not published'))
 
-    state.tim._send = transport.send.bind(transport)
-  } else if (args.type === 'http') {
-    transport = new HttpClient()
-    state.tim.ready().then(() => {
-      transport.setRootHash(state.tim.myRootHash())
-    })
-
-    state.tim._send = function (rootHash, msg, recipientInfo) {
-      transport.addRecipient(rootHash, serverUrl)
-      return transport.send.apply(transport, arguments)
-    }
+    return Q.ninvoke(state.tim.transactions(), 'get', txId)
+      .then(txInfo => state.tim.lookupObject(txInfo))
+      .then(obj => provider.bot[ROOT_HASH] = obj[ROOT_HASH])
   }
-
-  transport.on('message', state.tim.receiveMsg)
-  state.preferences.transport = args
-  savePreferences()
-  cb()
 }
 
 function show (args, cb) {
@@ -955,12 +1114,12 @@ function setAlias (alias, identifier) {
 }
 
 function savePreferences () {
-  fs.writeFile(getPreferencesPath(state.handle), prettify(state.preferences), (err) => {
-    if (!err) return
-
+  try {
+    writeFile.sync(getPreferencesPath(state.handle), prettify(state.preferences))
+  } catch (err) {
     vorpal.log('failed to safe preferences:')
     vorpal.log(err)
-  })
+  }
 }
 
 function getAlias (alias) {
@@ -1003,6 +1162,11 @@ function getLogger (obj) {
 
 function newPreferences () {
   return {
-    aliases: {}
+    aliases: {},
+    providers: {}
   }
+}
+
+function getProviderHash (provider) {
+  return provider.bot[ROOT_HASH]
 }
