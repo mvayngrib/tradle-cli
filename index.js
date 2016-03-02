@@ -160,9 +160,19 @@ vorpal
     cb()
   })
 
-// vorpal
-//   .command('settransport <type> <serverUrl>', 'Set transport: "ws" or "http"')
-//   .action(setTransport)
+vorpal
+  .command('settransport <type>', 'Set transport: "ws" or "http"')
+  .action(function (args, cb) {
+    const tranport = args.type
+    if (transport !== 'ws' && transport !== 'http') {
+      this.log('Valid values are: "ws" and "http"')
+      return cb()
+    }
+
+    state.preferences.transport = transport
+    savePreferences()
+    cb()
+  })
 
 vorpal
   .command('meet <identifier>', 'Introduce yourself to a stranger')
@@ -951,20 +961,27 @@ function setUser (args, cb) {
     })
 
     if (!id) {
-//       logErr(new Error('no transport for recipient: ' + recipientHash))
       return Q.reject(new Error('no transport for recipient'))
     }
 
     const provider = providers[id]
-    const url = `${provider.baseUrl}/${provider.id}/ws`
-    const otrKey = find(state.keys, (k) => {
-      return k.type === 'dsa'
-    })
+    if (state.preferences.transport === 'ws') {
+      const url = `${provider.baseUrl}/${provider.id}/ws`
+      const otrKey = find(state.keys, (k) => {
+        return k.type === 'dsa'
+      })
 
-    transport = new WebSocketClient({
-      url: url,
-      otrKey: DSA.parsePrivate(otrKey.priv)
-    })
+      transport = new WebSocketClient({
+        url: url,
+        otrKey: DSA.parsePrivate(otrKey.priv)
+      })
+    } else {
+      transport = new HttpClient({
+        rootHash: tim.myRootHash()
+      })
+
+      transport.addRecipient(recipientHash, `${provider.baseUrl}/${provider.id}/send`)
+    }
 
     transports[recipientHash] = transport
     // rootHashToClient[provider[ROOT_HASH]] = transport
@@ -1174,6 +1191,7 @@ function getLogger (obj) {
 
 function newPreferences () {
   return {
+    transport: 'ws',
     aliases: {},
     providers: {}
   }
