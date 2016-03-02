@@ -102,7 +102,7 @@ let state = {}
 const showCli = vorpal.show
 vorpal.show = function () {
   console.log(BANNER)
-  setTimeout(() => vorpal.exec('help'), 100)
+  // setTimeout(() => vorpal.exec('help'), 100)
   return showCli.apply(vorpal, arguments)
 }
 
@@ -198,7 +198,7 @@ vorpal
   })
 
 vorpal
-  .command('simplemsg <identifier>', 'Send a tradle.SimpleMessage to someone')
+  .command('simplemsg <identifier> [message]', 'Send a tradle.SimpleMessage to someone')
   // .option('-m, --message', 'Message text')
   // .option('-s, --sign', 'Sign the message (yes)')
   .help(IDENTIFIER_EXPLANATION)
@@ -210,13 +210,17 @@ vorpal
     findRecipient(args.identifier)
     .then((recipient) => opts.to = toCoords(recipient))
     .then(() => {
-      return this.prompt([
-        {
-          type: 'input',
-          name: 'message',
-          message: 'enter your message '
-        }
-      ])
+      const getMessage = args.message
+        ? Q({ message: args.message })
+        : this.prompt([
+          {
+            type: 'input',
+            name: 'message',
+            message: 'enter your message '
+          }
+        ])
+
+      return getMessage
     })
     .then(result => {
       opts.msg = {
@@ -231,12 +235,20 @@ vorpal
   })
 
 vorpal
-  .command('msg <identifier>', 'Send a message to someone')
+  .command('msg <identifier> [msg]', 'Send a message to someone')
   .help(IDENTIFIER_EXPLANATION)
   .action(function (args, cb) {
     if (!canSend.call(this)) return cb()
 
     let constructMessage = () => {
+      if (args.msg) {
+        try {
+          return Q(JSON.parse(args.msg))
+        } catch (err) {
+          return Q.reject('invalid JSON: ' + args.msg)
+        }
+      }
+
       return this.prompt([
         {
           type: 'input',
@@ -831,7 +843,7 @@ function sendMsg (opts) {
       let rh = entries[0].get(ROOT_HASH)
       let sentHandler = (info) => {
         if (info[ROOT_HASH] === rh) {
-          this.log(`delivered ${info[TYPE]} with hash ${rh}`)
+          this.log(`delivered ${info[TYPE] || 'untyped message'} with hash ${rh}`)
           state.tim.removeListener('sent', sentHandler)
         }
       }
@@ -1153,7 +1165,7 @@ function getPreferencesPath (handle) {
 function logErr (err) {
   let logger = getLogger(this)
   logger.log(err)
-  if (DEV) logger.log(err.stack)
+  if (DEV && err.stack) logger.log(err.stack)
 }
 
 function getLogger (obj) {
