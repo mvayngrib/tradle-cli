@@ -759,6 +759,8 @@ vorpal
         contacts[recipient[ROOT_HASH]] = providerId
         savePreferences()
       })
+      .catch(err => logErr.call(this, err))
+      .then(() => cb())
   })
 
 // vorpal
