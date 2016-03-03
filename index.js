@@ -733,7 +733,7 @@ vorpal
   .action(function (args, cb) {
     if (!checkLoggedIn.call(this)) return cb()
 
-    const providers = state.preferences.providers || []
+    const providers = Object.keys(state.preferences.providers || {})
     this.log(providers.join('\n'))
     cb()
   })
