@@ -708,14 +708,9 @@ vorpal
           if (!bot) return
 
           state.tim.addContactIdentity(bot.pub)
-          return Builder()
-            .data(bot.pub)
-            .build()
-            .then(buf => {
-              return Q.ninvoke(tradleUtils, 'getStorageKeyFor', buf)
-            })
+          return getHash(bot.pub)
             .then(hash => {
-              return bot[CUR_HASH] = hash.toString('hex')
+              return bot[CUR_HASH] = hash
             })
         }))
         .then(results => {
@@ -763,18 +758,52 @@ vorpal
       .then(() => cb())
   })
 
-// vorpal
-//   .action('ls-contacts', 'List contacts')
-//   .command(function (args, cb) {
-//     if (!checkLoggedIn()) return cb()
+vorpal
+  .command('addcontact <alias> <pathToIdentity>', 'add a contact')
+  .action(function (args, cb) {
+    if (!checkLoggedIn.call(this)) return cb()
 
-//     const providers = state.preferences.providers
-//     const bots = Object.keys(providers)
-//       .filter(id => getProviderHash(providers[id]))
-//       .map(id => providers[id].bot)
+    const alias = args.alias
+    const iPath = args.pathToIdentity
+    let identity
+    try {
+      identity = fs.readFileSync(path.resolve(iPath), { encoding: 'utf8' })
+    } catch (err) {
+      this.log('file not found: ' + iPath)
+      return cb()
+    }
 
-//     this.log(bots.join('\n'))
-//   })
+    try {
+      identity = JSON.parse(identity)
+    } catch (err) {
+      this.log('invalid json')
+      return cb()
+    }
+
+    Q.all([
+      getHash(identity),
+      state.tim.addContactIdentity(identity),
+    ])
+    .spread(hash => {
+      setAlias(alias, hash)
+    })
+    .catch(err => logErr.call(this, err))
+    .then(() => cb())
+  })
+
+vorpal
+  .command('ls-contacts', 'List contacts')
+  .action(function (args, cb) {
+    if (!checkLoggedIn()) return cb()
+
+    const providers = state.preferences.providers
+    const bots = Object.keys(providers)
+      .filter(id => getProviderHash(providers[id]))
+      .map(id => providers[id].bot)
+
+    this.log(bots.join('\n'))
+    cb()
+  })
 
 function printIdentityPublishStatus (tim) {
   return tim.identityPublishStatus()
@@ -860,6 +889,14 @@ function buildMsg (msg) {
   return Builder()
     .data(msg)
     .build()
+}
+
+function getHash (msg) {
+  return buildMsg(msg)
+    .then(buf => {
+      return Q.ninvoke(tradleUtils, 'getStorageKeyFor', buf)
+    })
+    .then(hash => hash.toString('hex'))
 }
 
 // function runDefault () {
