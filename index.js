@@ -127,19 +127,27 @@ vorpal
       return cb()
     }
 
+    try {
+      let existing = fs.readdirSync(getBasePath())
+      if (existing && existing.includes(handle)) {
+        this.log(`User ${handle} already exists`)
+        return cb()
+      }
+    } catch (err) {}
+
     this.log(`Generating a really good ${handle}. This may take a few seconds...`)
 
     let userPath = getUserPath(handle)
     Q.nfcall(genUser, {
       networkName: NETWORK_NAME
     })
-    .then((user) => {
+    .then(user => {
       mkdirp.sync(userPath)
       mkdirp.sync(getLogsPath(handle))
       return Q.all([
-        Q.ninvoke(writeFile, getIdentityPath(handle), prettify(user.pub)),
-        Q.ninvoke(writeFile, getKeysPath(handle), prettify(user.priv)),
-        Q.ninvoke(writeFile, getPreferencesPath(handle), prettify(newPreferences()))
+        Q.nfcall(writeFile, getIdentityPath(handle), prettify(user.pub)),
+        Q.nfcall(writeFile, getKeysPath(handle), prettify(user.priv)),
+        Q.nfcall(writeFile, getPreferencesPath(handle), prettify(newPreferences()))
       ])
     })
     .then(() => this.log(`Generated new user "${handle}" in ${userPath}`))
