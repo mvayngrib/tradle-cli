@@ -739,7 +739,7 @@ vorpal
   })
 
 vorpal
-  .command('setcontactprovider <providerId>', 'specify that a user with identifier <identifier> ' +
+  .command('setcontactprovider <providerId> <identifier>', 'specify that a user with identifier <identifier> ' +
     'can be contacted at a specific provider')
   .action(function (args, cb) {
     if (!checkLoggedIn.call(this)) return cb()
