@@ -163,7 +163,7 @@ vorpal
 vorpal
   .command('settransport <type>', 'Set transport: "ws" or "http"')
   .action(function (args, cb) {
-    const tranport = args.type
+    const transport = args.type
     if (transport !== 'ws' && transport !== 'http') {
       this.log('Valid values are: "ws" and "http"')
       return cb()
