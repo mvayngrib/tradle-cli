@@ -728,6 +728,39 @@ vorpal
       .then(() => cb())
   })
 
+vorpal
+  .command('ls-providers', 'list providers loaded from added server urls')
+  .action(function (args, cb) {
+    if (!checkLoggedIn.call(this)) return cb()
+
+    const providers = state.preferences.providers || []
+    this.log(providers.join('\n'))
+    cb()
+  })
+
+vorpal
+  .command('setcontactprovider <providerId>', 'specify that a user with identifier <identifier> ' +
+    'can be contacted at a specific provider')
+  .action(function (args, cb) {
+    if (!checkLoggedIn.call(this)) return cb()
+
+    const providerId = args.providerId
+    const providers = state.preferences.providers
+    const provider = providers && providers[providerId]
+    if (!provider) {
+      this.log(`provider with id ${providerId} not found`)
+      return cb()
+    }
+
+    const contacts = state.preferences.contacts
+    findRecipient(args.identifier)
+      .then(recipient => {
+        contacts[recipient[CUR_HASH]] =
+        contacts[recipient[ROOT_HASH]] = providerId
+        savePreferences()
+      })
+  })
+
 // vorpal
 //   .action('ls-contacts', 'List contacts')
 //   .command(function (args, cb) {
@@ -964,17 +997,25 @@ function setUser (args, cb) {
     if (transport) return transport.send.apply(transport, arguments)
 
     const providers = state.preferences.providers
-    const id = find(Object.keys(providers), id => {
+    let id = find(Object.keys(providers), id => {
       return providers[id].bot[CUR_HASH] === recipientHash
     })
+
+    if (!id) {
+      const contact = state.preferences.contacts[recipientHash]
+      if (contact) {
+        id = contact.provider
+      }
+    }
 
     if (!id) {
       return Q.reject(new Error('no transport for recipient'))
     }
 
     const provider = providers[id]
+    const serverUrl = getProviderUrl(provider)
     if (state.preferences.transport === 'ws') {
-      const url = `${provider.baseUrl}/${provider.id}/ws`
+      const url = `${serverUrl}/ws`
       const otrKey = find(state.keys, (k) => {
         return k.type === 'dsa'
       })
@@ -988,7 +1029,7 @@ function setUser (args, cb) {
         rootHash: tim.myRootHash()
       })
 
-      transport.addRecipient(recipientHash, `${provider.baseUrl}/${provider.id}/send`)
+      transport.addRecipient(recipientHash, `${serverUrl}/send`)
     }
 
     transports[recipientHash] = transport
@@ -1130,14 +1171,16 @@ function checkLoggedIn () {
 }
 
 function canSend () {
-  if (!checkLoggedIn()) return
+  return checkLoggedIn()
 
-  let logger = this && this.log ? this : vorpal
-  if (!state.tim._send) {
-    logger.log('please run "settransport" first')
-  } else {
-    return true
-  }
+  // if (!checkLoggedIn()) return
+
+  // let logger = this && this.log ? this : vorpal
+  // if (!state.tim._send) {
+  //   logger.log('please run "settransport" first')
+  // } else {
+  //   return true
+  // }
 }
 
 function lookupAndLog (info) {
@@ -1201,10 +1244,15 @@ function newPreferences () {
   return {
     transport: 'ws',
     aliases: {},
-    providers: {}
+    providers: {},
+    contacts: {}
   }
 }
 
 function getProviderHash (provider) {
   return provider.bot[ROOT_HASH]
+}
+
+function getProviderUrl (provider) {
+  return `${provider.baseUrl}/${provider.id}`
 }
