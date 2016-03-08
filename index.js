@@ -791,19 +791,19 @@ vorpal
     .then(() => cb())
   })
 
-vorpal
-  .command('ls-contacts', 'List contacts')
-  .action(function (args, cb) {
-    if (!checkLoggedIn()) return cb()
+// vorpal
+//   .command('ls-contacts', 'List contacts')
+//   .action(function (args, cb) {
+//     if (!checkLoggedIn()) return cb()
 
-    const providers = state.preferences.providers
-    const bots = Object.keys(providers)
-      .filter(id => getProviderHash(providers[id]))
-      .map(id => providers[id].bot)
+//     const providers = state.preferences.providers
+//     const bots = Object.keys(providers)
+//       .filter(id => getProviderHash(providers[id]))
+//       .map(id => `${id} bot: ${providers[id].bot[CUR_HASH]}`)
 
-    this.log(bots.join('\n'))
-    cb()
-  })
+//     this.log(bots.join('\n'))
+//     cb()
+//   })
 
 function printIdentityPublishStatus (tim) {
   return tim.identityPublishStatus()
@@ -1289,7 +1289,7 @@ function newPreferences () {
 }
 
 function getProviderHash (provider) {
-  return provider.bot[ROOT_HASH]
+  return provider.bot[CUR_HASH]
 }
 
 function getProviderUrl (provider) {
