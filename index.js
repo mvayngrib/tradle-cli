@@ -23,7 +23,10 @@ const Identity = require('@tradle/identity').Identity
 const DSA = require('@tradle/otr').DSA
 const Builder = require('@tradle/chained-obj').Builder
 const tradleUtils = require('@tradle/utils')
-const WebSocketClient = require('@tradle/ws-client')
+const Sendy = require('sendy')
+const SendyWS = require('sendy-ws')
+const newSwitchboard = SendyWS.Switchboard
+const WebSocketClient = SendyWS.Client
 const HttpClient = require('@tradle/transport-http').HttpClient
 const TYPE = constants.TYPE
 const ROOT_HASH = constants.ROOT_HASH
@@ -40,13 +43,7 @@ const noop = () => {}
 Debug.log = noop // initially
 
 module.exports = {
-  cli: vorpal,
-  // getUserIdentityPath: getIdentityPath,
-  // genUser,
-  // getUserIdentity,
-  // prettify,
-  // getLogger,
-  // logErr
+  cli: vorpal
 }
 
 let selfDestructing
@@ -736,6 +733,10 @@ vorpal
           state.tim.watchTxs(bot.txId)
           return getHash(bot.pub)
             .then(hash => {
+              if (!state.preferences.aliases[p.id]) {
+                setAlias(p.id, hash)
+              }
+
               return bot[CUR_HASH] = hash
             })
         }))
@@ -1068,9 +1069,16 @@ function setUser (args, cb) {
   })
 
   const transports = {}
+  const wsClients = {}
   tim._send = function (recipientHash /* ... */) {
     let transport = transports[recipientHash]
-    if (transport) return transport.send.apply(transport, arguments)
+    if (transport) {
+      if (transport instanceof HttpClient) {
+        return transport.send.apply(transport, arguments)
+      } else {
+        return Q.ninvoke(transport, 'send', recipientHash, arguments[1])
+      }
+    }
 
     const providers = state.preferences.providers
     let id = find(Object.keys(providers), id => {
@@ -1091,14 +1099,25 @@ function setUser (args, cb) {
     const provider = providers[id]
     const serverUrl = getProviderUrl(provider)
     if (state.preferences.transport === 'ws') {
-      const url = `${serverUrl}/ws`
-      const otrKey = find(state.keys, (k) => {
-        return k.type === 'dsa'
-      })
+      const url = `${serverUrl}/ws?from=` + tim.myRootHash()
+      // const otrKey = find(state.keys, (k) => {
+      //   return k.type === 'dsa'
+      // })
 
-      transport = new WebSocketClient({
-        url: url,
-        otrKey: DSA.parsePrivate(otrKey.priv)
+      var wsClient = wsClients[url]
+      if (!wsClient) {
+        wsClient = wsClients[url] = new WebSocketClient({
+          url: url
+        })
+      }
+
+      transport = newSwitchboard({
+        identifier: tim.myRootHash(),
+        unreliable: wsClient,
+        clientForRecipient: function (recipient) {
+          return new Sendy()
+        }
+        // otrKey: DSA.parsePrivate(otrKey.priv)
       })
     } else {
       transport = new HttpClient({
@@ -1110,13 +1129,22 @@ function setUser (args, cb) {
 
     transports[recipientHash] = transport
     // rootHashToClient[provider[ROOT_HASH]] = transport
-    transport.on('message', tim.receiveMsg)
+    transport.on('message', function (msg, theirHash) {
+      tim.receiveMsg(msg, {
+        [ROOT_HASH]: theirHash
+      })
+    })
+
     return tim._send.apply(this, arguments)
   }
 
   tim.once('destroy', () => {
     for (let hash in transports) {
       transports[hash].destroy()
+    }
+
+    for (var url in wsClients) {
+      wsClients[url].destroy()
     }
   })
 
