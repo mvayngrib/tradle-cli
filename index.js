@@ -86,16 +86,16 @@ const BANNER =
 const IDENTIFIER_EXPLANATION = '<identifier> can be the other party\'s key fingerprint, root hash or current hash'
 
 // for now
-const manualTxs = [
-  // safe
-  'a605b1b60a8616a7e145834e1831d498689eb5fc212d1e8c11c45a27ea59b5f8',
-  // easy
-  '0080491d1b9d870c6dcc8a60f87fa0ba1fcc617f76e8f414ecb1dd86188367a9',
-  // europi
-  '90c357e9f37a95d849677f6048838bc70a6694829c30988add3fe16af38955ac',
-  // friendly
-  '235f8ffd7a3f5ecd5de3408cfaad0d01a36a96195ff491850257bc5c3098b28b'
-]
+// const manualTxs = [
+//   // safe
+//   'a605b1b60a8616a7e145834e1831d498689eb5fc212d1e8c11c45a27ea59b5f8',
+//   // easy
+//   '0080491d1b9d870c6dcc8a60f87fa0ba1fcc617f76e8f414ecb1dd86188367a9',
+//   // europi
+//   '90c357e9f37a95d849677f6048838bc70a6694829c30988add3fe16af38955ac',
+//   // friendly
+//   '235f8ffd7a3f5ecd5de3408cfaad0d01a36a96195ff491850257bc5c3098b28b'
+// ]
 
 let state = {}
 
@@ -697,7 +697,8 @@ vorpal
         // rm settransport
         // add ls-contacts
         // add txs to watch
-        return Q.allSettled(res.body.providers.map(p => {
+        const newProviders = res.body.providers
+        return Q.allSettled(newProviders.map(p => {
           p.baseUrl = url
           const saved = providers[p]
           if (!saved || saved.baseUrl === url) {
@@ -708,13 +709,25 @@ vorpal
           if (!bot) return
 
           state.tim.addContactIdentity(bot.pub)
+          state.tim.watchTxs(bot.txId)
           return getHash(bot.pub)
             .then(hash => {
               return bot[CUR_HASH] = hash
             })
         }))
         .then(results => {
-          if (results.some(r => r.value)) {
+          let save
+          results.forEach((r, i) => {
+            if (!r.value) return
+
+            save = true
+            const provider = newProviders[i]
+            const id = provider.id
+            setAlias(id, provider.bot[CUR_HASH])
+            this.log(`added provider ${provider.org.name} with alias ${id}`)
+          })
+
+          if (save) {
             savePreferences()
           }
         })
@@ -1014,7 +1027,7 @@ function setUser (args, cb) {
     afterBlockTimestamp: constants.afterBlockTimestamp
   })
 
-  tim.watchTxs(manualTxs)
+  // tim.watchTxs(manualTxs)
   tim.on('error', (err) => vorpal.log(err))
   tim.on('message', (info) => {
     if (!state.currentMode) {
@@ -1159,29 +1172,29 @@ function setUser (args, cb) {
 //   cb()
 // }
 
-function loadProviderIdentities () {
-  const providers = state.preferences.providers
-  return Q.allSettled(Object.keys(providers).map(id => {
-    const provider = providers[id]
-    if (provider[ROOT_HASH]) return
+// function loadProviderIdentities () {
+//   const providers = state.preferences.providers
+//   return Q.allSettled(Object.keys(providers).map(id => {
+//     const provider = providers[id]
+//     if (provider[ROOT_HASH]) return
 
-    return lookup(provider)
-  }))
-  .then(results => {
-    if (results.some(r => r.value)) {
-      savePreferences()
-    }
-  })
+//     return lookup(provider)
+//   }))
+//   .then(results => {
+//     if (results.some(r => r.value)) {
+//       savePreferences()
+//     }
+//   })
 
-  function lookup (provider) {
-    const txId = provider.bot.txId
-    if (!txId) return Q.reject(new Error('provider bot not published'))
+//   function lookup (provider) {
+//     const txId = provider.bot.txId
+//     if (!txId) return Q.reject(new Error('provider bot not published'))
 
-    return Q.ninvoke(state.tim.transactions(), 'get', txId)
-      .then(txInfo => state.tim.lookupObject(txInfo))
-      .then(obj => provider.bot[ROOT_HASH] = obj[ROOT_HASH])
-  }
-}
+//     return Q.ninvoke(state.tim.transactions(), 'get', txId)
+//       .then(txInfo => state.tim.lookupObject(txInfo))
+//       .then(obj => provider.bot[ROOT_HASH] = obj[ROOT_HASH])
+//   }
+// }
 
 function show (args, cb) {
   let logger = getLogger(this)
