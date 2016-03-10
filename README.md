@@ -25,6 +25,19 @@ Run the tradle-cli container:
 docker run -it --rm --name tradle-cli -e "HOME=/tdata" --volumes-from tradle-cli-data tradle/cli:dev
 ```
 
+#### Dockerized on a Mac, with local Dockerized server
+
+Create a data volume container, same as above, then:
+
+```bash
+# get the ip of the docker-machine, used below as DOCKER_MACHINE_IP
+docker-machine ip machine_name
+# run tradle-cli with option: `--net host`
+docker run -it --rm --name tradle-cli -e "HOME=/tdata" --volumes-from tradle-cli-data --net host tradle/cli:dev
+# add local server
+tradle$ addserver http://${DOCKER_MACHINE_IP}:44444
+```
+
 #### Directly on host
 
 ```bash
