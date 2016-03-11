@@ -6,6 +6,7 @@ const path = require('path')
 const find = require('array-find')
 const request = require('superagent')
 const writeFile = require('write-file-atomic')
+require('./q-to-bluebird')
 const Q = require('bluebird-q')
 const bs58check = require('bs58check')
 const deepExtend = require('deep-extend')
@@ -25,6 +26,7 @@ const Builder = require('@tradle/chained-obj').Builder
 const tradleUtils = require('@tradle/utils')
 const Sendy = require('sendy')
 const SendyWS = require('sendy-ws')
+const newOTRSwitchboard = require('sendy-otr-ws').Switchboard
 const newSwitchboard = SendyWS.Switchboard
 const WebSocketClient = SendyWS.Client
 const HttpClient = require('@tradle/transport-http').HttpClient
@@ -1069,14 +1071,30 @@ function setUser (args, cb) {
   })
 
   const transports = {}
-  const wsClients = {}
-  tim._send = function (recipientHash /* ... */) {
+  const wsTransports = {}
+  let otrKey = DSA.parsePrivate(find(state.keys, (k) => {
+    return k.type === 'dsa'
+  }).priv)
+
+  // unecrypted mode
+  otrKey = null
+
+  tim._send = function (recipientHash, msg, recipientInfo) {
     let transport = transports[recipientHash]
     if (transport) {
       if (transport instanceof HttpClient) {
         return transport.send.apply(transport, arguments)
       } else {
-        return Q.ninvoke(transport, 'send', recipientHash, arguments[1])
+        let identifier
+        if (otrKey) {
+          identifier = recipientInfo.identity.pubkeys.filter(function (k) {
+            return k.type === 'dsa'
+          })[0].fingerprint
+        } else {
+          identifier = recipientHash
+        }
+
+        return Q.ninvoke(transport, 'send', identifier, msg)
       }
     }
 
@@ -1099,26 +1117,44 @@ function setUser (args, cb) {
     const provider = providers[id]
     const serverUrl = getProviderUrl(provider)
     if (state.preferences.transport === 'ws') {
-      const url = `${serverUrl}/ws?from=` + tim.myRootHash()
-      // const otrKey = find(state.keys, (k) => {
-      //   return k.type === 'dsa'
-      // })
+      const identifier = otrKey ? otrKey.fingerprint() : tim.myRootHash()
+      const url = `${serverUrl}/ws?from=` + identifier
+      transport = wsTransports[url]
+      if (!transport) {
+        const wsClient = new WebSocketClient({
+          url: url,
+          autoConnect: true
+        })
 
-      var wsClient = wsClients[url]
-      if (!wsClient) {
-        wsClient = wsClients[url] = new WebSocketClient({
-          url: url
+        if (otrKey) {
+          transport = newOTRSwitchboard({
+            key: otrKey,
+            unreliable: wsClient
+          })
+        } else {
+          transport = newSwitchboard({
+            identifier: identifier,
+            unreliable: wsClient
+          })
+        }
+
+        wsTransports[url] = transport
+
+        let timeouts = {}
+        transport.on('receiving', function (msg) {
+          clearTimeout(timeouts[msg.from])
+          delete timeouts[msg.from]
+        })
+
+        transport.on('404', function (recipient) {
+          if (!timeouts[recipient]) {
+            timeout = setTimeout(function () {
+              delete timeouts[recipient]
+              transport.cancelPending(recipient)
+            }, 10000)
+          }
         })
       }
-
-      transport = newSwitchboard({
-        identifier: tim.myRootHash(),
-        unreliable: wsClient,
-        clientForRecipient: function (recipient) {
-          return new Sendy()
-        }
-        // otrKey: DSA.parsePrivate(otrKey.priv)
-      })
     } else {
       transport = new HttpClient({
         rootHash: tim.myRootHash()
@@ -1143,8 +1179,8 @@ function setUser (args, cb) {
       transports[hash].destroy()
     }
 
-    for (var url in wsClients) {
-      wsClients[url].destroy()
+    for (var url in wsTransports) {
+      wsTransports[url].destroy()
     }
   })
 
