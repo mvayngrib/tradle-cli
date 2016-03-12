@@ -26,7 +26,9 @@ const Builder = require('@tradle/chained-obj').Builder
 const tradleUtils = require('@tradle/utils')
 const Sendy = require('sendy')
 const SendyWS = require('sendy-ws')
-const newOTRSwitchboard = require('sendy-otr-ws').Switchboard
+const OTRClient = require('sendy-otr')
+const SENDY_OPTS = { resendInterval: 1000 }
+// const newOTRSwitchboard = require('sendy-otr-ws').Switchboard
 const newSwitchboard = SendyWS.Switchboard
 const WebSocketClient = SendyWS.Client
 const HttpClient = require('@tradle/transport-http').HttpClient
@@ -1077,7 +1079,7 @@ function setUser (args, cb) {
   }).priv)
 
   // unecrypted mode
-  otrKey = null
+  // otrKey = null
 
   tim._send = function (recipientHash, msg, recipientInfo) {
     let transport = transports[recipientHash]
@@ -1127,14 +1129,31 @@ function setUser (args, cb) {
         })
 
         if (otrKey) {
-          transport = newOTRSwitchboard({
-            key: otrKey,
-            unreliable: wsClient
+          transport = newSwitchboard({
+            identifier: identifier,
+            unreliable: wsClient,
+            clientForRecipient: function (recipient) {
+              return new OTRClient({
+                key: otrKey,
+                client: new Sendy(SENDY_OPTS),
+                theirFingerprint: recipient
+              })
+            }
+          })
+
+          wsClient.on('disconnect', function () {
+            transport.clients().forEach(function (c) {
+              // reset OTR session, restart on connect
+              c.reset()
+            })
           })
         } else {
           transport = newSwitchboard({
             identifier: identifier,
-            unreliable: wsClient
+            unreliable: wsClient,
+            clientForRecipient: function () {
+              return new Sendy(SENDY_OPTS)
+            }
           })
         }
 

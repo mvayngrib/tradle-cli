@@ -33,7 +33,7 @@
     "mkdirp": "^0.5.1",
     "mockery": "^1.4.1",
     "sendy": "^1.2.3",
-    "sendy-otr-ws": "^1.0.2",
+    "sendy-otr": "^1.0.2",
     "sendy-ws": "^1.2.1",
     "superagent": "^1.7.2",
     "tim": "^6.3.1",
