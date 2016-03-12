@@ -1165,9 +1165,10 @@ function setUser (args, cb) {
 
     transports[recipientHash] = transport
     // rootHashToClient[provider[ROOT_HASH]] = transport
-    transport.on('message', function (msg, theirHash) {
+    transport.on('message', function (msg, from) {
+      var prop = otrKey ? 'fingerprint' : ROOT_HASH
       tim.receiveMsg(msg, {
-        [ROOT_HASH]: theirHash
+        [prop]: from
       })
     })
 
