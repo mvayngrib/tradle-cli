@@ -1079,7 +1079,7 @@ function setUser (args, cb) {
   }).priv)
 
   // unecrypted mode
-  // otrKey = null
+  otrKey = null
 
   tim._send = function (recipientHash, msg, recipientInfo) {
     let transport = transports[recipientHash]
