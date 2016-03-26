@@ -1144,7 +1144,8 @@ function setUser (args, cb) {
           wsClient.on('disconnect', function () {
             transport.clients().forEach(function (c) {
               // reset OTR session, restart on connect
-              c.reset()
+              debug('aborting pending sends due to disconnect')
+              c.reset(true)
             })
           })
         } else {
