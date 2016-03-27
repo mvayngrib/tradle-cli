@@ -1096,6 +1096,7 @@ function setUser (args, cb) {
           identifier = recipientHash
         }
 
+        transport.setTimeout(5000)
         return Q.ninvoke(transport, 'send', identifier, msg)
       }
     }
@@ -1140,14 +1141,6 @@ function setUser (args, cb) {
               })
             }
           })
-
-          wsClient.on('disconnect', function () {
-            transport.clients().forEach(function (c) {
-              // reset OTR session, restart on connect
-              debug('aborting pending sends due to disconnect')
-              c.reset(true)
-            })
-          })
         } else {
           transport = newSwitchboard({
             identifier: identifier,
@@ -1157,6 +1150,14 @@ function setUser (args, cb) {
             }
           })
         }
+
+        wsClient.on('disconnect', function () {
+          transport.clients().forEach(function (c) {
+            // reset OTR session, restart on connect
+            debug('aborting pending sends due to disconnect')
+            c.reset(true)
+          })
+        })
 
         wsTransports[url] = transport
 
@@ -1173,6 +1174,10 @@ function setUser (args, cb) {
               transport.cancelPending(recipient)
             }, 10000)
           }
+        })
+
+        transport.on('timeout', function (identifier) {
+          transport.cancelPending(identifier)
         })
       }
     } else {
