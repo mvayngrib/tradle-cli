@@ -31,7 +31,7 @@ const SENDY_OPTS = { resendInterval: 1000 }
 // const newOTRSwitchboard = require('sendy-otr-ws').Switchboard
 const newSwitchboard = SendyWS.Switchboard
 const WebSocketClient = SendyWS.Client
-const HttpClient = require('@tradle/transport-http').HttpClient
+// const HttpClient = require('@tradle/transport-http').HttpClient
 const TYPE = constants.TYPE
 const ROOT_HASH = constants.ROOT_HASH
 const CUR_HASH = constants.CUR_HASH
@@ -1084,9 +1084,9 @@ function setUser (args, cb) {
   tim._send = function (recipientHash, msg, recipientInfo) {
     let transport = transports[recipientHash]
     if (transport) {
-      if (transport instanceof HttpClient) {
-        return transport.send.apply(transport, arguments)
-      } else {
+      // if (transport instanceof HttpClient) {
+      //   return transport.send.apply(transport, arguments)
+      // } else {
         let identifier
         if (otrKey) {
           identifier = recipientInfo.identity.pubkeys.filter(function (k) {
@@ -1098,7 +1098,7 @@ function setUser (args, cb) {
 
         transport.setTimeout(5000)
         return Q.ninvoke(transport, 'send', identifier, msg)
-      }
+      // }
     }
 
     const providers = state.preferences.providers
@@ -1119,7 +1119,7 @@ function setUser (args, cb) {
 
     const provider = providers[id]
     const serverUrl = getProviderUrl(provider)
-    if (state.preferences.transport === 'ws') {
+    // if (state.preferences.transport === 'ws') {
       const identifier = otrKey ? otrKey.fingerprint() : tim.myRootHash()
       const url = `${serverUrl}/ws?from=` + identifier
       transport = wsTransports[url]
@@ -1180,13 +1180,13 @@ function setUser (args, cb) {
           transport.cancelPending(identifier)
         })
       }
-    } else {
-      transport = new HttpClient({
-        rootHash: tim.myRootHash()
-      })
+    // } else {
+    //   transport = new HttpClient({
+    //     rootHash: tim.myRootHash()
+    //   })
 
-      transport.addRecipient(recipientHash, `${serverUrl}/send`)
-    }
+    //   transport.addRecipient(recipientHash, `${serverUrl}/send`)
+    // }
 
     transports[recipientHash] = transport
     // rootHashToClient[provider[ROOT_HASH]] = transport

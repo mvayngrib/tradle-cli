@@ -20,7 +20,6 @@
     "@tradle/identity": "^1.2.2",
     "@tradle/kiki": "^1.1.14",
     "@tradle/otr": "^0.2.16",
-    "@tradle/transport-http": "^1.0.0",
     "@tradle/utils": "^1.2.5",
     "array-find": "^1.0.0",
     "bluebird-q": "^1.0.3",
