@@ -170,19 +170,19 @@ vorpal
     cb()
   })
 
-vorpal
-  .command('settransport <type>', 'Set transport: "ws" or "http"')
-  .action(function (args, cb) {
-    const transport = args.type
-    if (transport !== 'ws' && transport !== 'http') {
-      this.log('Valid values are: "ws" and "http"')
-      return cb()
-    }
+// vorpal
+//   .command('settransport <type>', 'Set transport: "ws" or "http"')
+//   .action(function (args, cb) {
+//     const transport = args.type
+//     if (transport !== 'ws' && transport !== 'http') {
+//       this.log('Valid values are: "ws" and "http"')
+//       return cb()
+//     }
 
-    state.preferences.transport = transport
-    savePreferences()
-    cb()
-  })
+//     state.preferences.transport = transport
+//     savePreferences()
+//     cb()
+//   })
 
 vorpal
   .command('meet <identifier>', 'Introduce yourself to a stranger')
