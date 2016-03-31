@@ -1,6 +1,12 @@
 #!/bin/bash
 
+if [ -z "$1" ]; then
+  echo "specify an image tag"
+  exit 1
+fi
+
+source ~/.bash_profile
 echo 'building new docker image...'
-mv node_modules $TMPDIR/tradle_cli_node_modules
-docker build -t tradle/cli:dev .
-mv $TMPDIR/tradle_cli_node_modules node_modules
+cp ~/.npmrc .npmrc
+docker build -t "tradle/cli:$1" .
+rm -f .npmrc
