@@ -370,7 +370,7 @@ vorpal
 
 vorpal
   .command('ls', 'List stored objects')
-  .option('-t, --type', 'Limit objects by type, e.g. tradle.Identity')
+  .option('-t, --type <type>', 'Limit objects by type, e.g. tradle.Identity')
   .action(function (args, cb) {
     if (!state.tim) {
       this.log('please run "setuser" first')
@@ -734,7 +734,10 @@ vorpal
           if (!bot) return
 
           state.tim.addContactIdentity(bot.pub)
-          state.tim.watchTxs(bot.txId)
+          if (bot.txId) {
+            state.tim.watchTxs(bot.txId)
+          }
+
           return getHash(bot.pub)
             .then(hash => {
               if (!state.preferences.aliases[p.id]) {
@@ -906,26 +909,26 @@ function previewSend (msg) {
   })
 }
 
-function maybeSign (msg) {
-  return this.prompt([
-    {
-      type: 'confirm',
-      name: 'sign',
-      message: 'sign the message? (yes) ',
-      default: true
-    }
-  ])
-  .then((result) => {
-    if (!result.sign) return msg
+// function maybeSign (msg) {
+//   return this.prompt([
+//     {
+//       type: 'confirm',
+//       name: 'sign',
+//       message: 'sign the message? (yes) ',
+//       default: true
+//     }
+//   ])
+//   .then((result) => {
+//     if (!result.sign) return msg
 
-    return state.tim.sign(msg)
-      .then(signed => {
-        let sig = JSON.parse(signed.toString())[SIG]
-        this.log('sig: ' + sig)
-        return signed
-      })
-  })
-}
+//     return state.tim.sign(msg)
+//       .then(signed => {
+//         let sig = JSON.parse(signed.toString())[SIG]
+//         this.log('sig: ' + sig)
+//         return signed
+//       })
+//   })
+// }
 
 function buildMsg (msg) {
   return Builder()
@@ -963,7 +966,7 @@ function debug () {
 
 function sendMsg (opts) {
   let msg = opts.msg
-  return maybeSign.call(this, msg)
+  return state.tim.sign(msg)
     .then(previewSend.bind(this))
     .then(buildMsg)
     .then((buf) => {
@@ -1155,6 +1158,7 @@ function setUser (args, cb) {
           transport.clients().forEach(function (c) {
             // reset OTR session, restart on connect
             // debug('aborting pending sends due to disconnect')
+            // c.destroy()
             c.reset(true)
           })
         })
