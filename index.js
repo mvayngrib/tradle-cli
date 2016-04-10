@@ -1158,8 +1158,8 @@ function setUser (args, cb) {
           transport.clients().forEach(function (c) {
             // reset OTR session, restart on connect
             // debug('aborting pending sends due to disconnect')
-            // c.destroy()
-            c.reset(true)
+            c.destroy()
+            // c.reset(true)
           })
         })
 
