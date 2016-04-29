@@ -857,7 +857,7 @@ function toCoords (recipient) {
 
 function previewSend (msg) {
   let json = Buffer.isBuffer(msg)
-    ? JSON.parse(msg.toString('binary'))
+    ? JSON.parse(msg.toString())
     : msg
 
   return this.prompt([
@@ -891,7 +891,7 @@ function maybeSign (msg) {
 
     return state.tim.sign(msg)
       .then(signed => {
-        let sig = JSON.parse(signed.toString('binary'))[SIG]
+        let sig = JSON.parse(signed.toString())[SIG]
         this.log('sig: ' + sig)
         return signed
       })
