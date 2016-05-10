@@ -17,6 +17,7 @@ const Table = require('cli-table')
 const Debug = require('debug')
 // const debug = Debug('tradle-cli')
 const leveldown = require('leveldown')
+const models = require('@tradle/models')
 const constants = require('@tradle/constants')
 const Identity = require('@tradle/identity').Identity
 const DSA = require('@tradle/otr').DSA
@@ -281,7 +282,7 @@ vorpal
         }
 
         this.log('type: ' + result.type)
-        return setProperties(msg)
+        return models[msg[TYPE]] ? setPropertiesUsingModel(msg) : setProperties(msg)
       })
     }
 
@@ -301,6 +302,29 @@ vorpal
         }
 
         return msg
+      })
+    }
+
+    let setPropertiesUsingModel = (msg) =>  {
+      const model = models[msg[TYPE]]
+      let required = model.required || Object.keys(model.properties)
+      required = required.filter(p => {
+        return p !== 'from' && p !== 'to' && p !== 'photos' && !(p in msg)
+      })
+
+      if (!required.length) return Q(msg)
+
+      const next = required.pop()
+      return this.prompt([
+        {
+          type: 'input',
+          name: 'value',
+          message: `${next}: `
+        }
+      ])
+      .then(result => {
+        msg[next] = result.value
+        return setPropertiesUsingModel(msg)
       })
     }
 
