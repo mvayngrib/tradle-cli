@@ -896,7 +896,7 @@ function previewSend (msg) {
     {
       type: 'confirm',
       name: 'confirm',
-      message: `About to send \n${prettify(json)}\n\nIs this OK? (yes)`,
+      message: `About to sign and send \n${prettify(json)}\n\nIs this OK? (yes)`,
       default: true
     }
   ])
