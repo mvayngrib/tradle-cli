@@ -27,7 +27,7 @@ const tradleUtils = require('@tradle/utils')
 const Sendy = require('sendy')
 const SendyWS = require('sendy-ws')
 const OTRClient = require('sendy-otr')
-const SENDY_OPTS = { resendInterval: 1000 }
+const SENDY_OPTS = { resendInterval: 1000, autoConnect: true }
 // const newOTRSwitchboard = require('sendy-otr-ws').Switchboard
 const newSwitchboard = SendyWS.Switchboard
 const WebSocketClient = SendyWS.Client
@@ -200,7 +200,7 @@ vorpal
         identity: state.identity
       }
 
-      return sendMsg.call(this, opts)
+      return cliUtils.signNSend(this, state.tim, opts)
     })
 
     //   return new Builder()
@@ -248,7 +248,7 @@ vorpal
         message: result.message
       }
 
-      return sendMsg.call(this, opts)
+      return cliUtils.signNSend(this, state.tim, opts)
     })
     .catch(err => logErr.call(this, err))
     .then(() => cb())
@@ -260,106 +260,16 @@ vorpal
   .action(function (args, cb) {
     if (!canSend.call(this)) return cb()
 
-    let constructMessage = () => {
-      if (args.msg) {
-        try {
-          return Q(JSON.parse(args.msg))
-        } catch (err) {
-          return Q.reject('invalid JSON: ' + args.msg)
-        }
-      }
-
-      return this.prompt([
-        {
-          type: 'input',
-          name: 'type',
-          message: 'type (tradle.SimpleMessage) ',
-          default: 'tradle.SimpleMessage'
-        }
-      ])
-      .then((result) => {
-        let msg = {
-          [TYPE]: result.type
-        }
-
-        this.log('type: ' + result.type)
-        return models[msg[TYPE]] ? setPropertiesUsingModel(msg) : setProperties(msg)
-      })
-    }
-
-    let setProperties = (msg) => {
-      return this.prompt([
-        {
-          type: 'confirm',
-          name: 'more',
-          message: 'Add more properties? (yes) ',
-          default: true
-        }
-      ])
-      .then((result) => {
-        if (result.more) {
-          return setProperty(msg)
-            .then(() => setProperties(msg))
-        }
-
-        return msg
-      })
-    }
-
-    let setPropertiesUsingModel = (msg) =>  {
-      const model = models[msg[TYPE]]
-      let required = model.required || Object.keys(model.properties)
-      required = required.filter(p => {
-        return p !== 'from' && p !== 'to' && p !== 'photos' && !(p in msg)
-      })
-
-      if (!required.length) return Q(msg)
-
-      const next = required.pop()
-      return this.prompt([
-        {
-          type: 'input',
-          name: 'value',
-          message: `${next}: `
-        }
-      ])
-      .then(result => {
-        msg[next] = result.value
-        return setPropertiesUsingModel(msg)
-      })
-    }
-
-    let setProperty = (msg) => {
-      return this.prompt([
-        {
-          type: 'input',
-          name: 'name',
-          message: 'property name: '
-        },
-        {
-          type: 'input',
-          name: 'value',
-          message: 'property value: '
-        }
-      ])
-      .then(result => {
-        let name = result.name
-        let value = result.value
-        msg[name] = value
-        return msg
-      })
-    }
-
     let opts = {
       deliver: true
     }
 
     findRecipient(args.identifier)
       .then((recipient) => opts.to = toCoords(recipient))
-      .then(constructMessage)
+      .then(() => cliUtils.promptBuildMsg(this, models))
       .then((msg) => {
         opts.msg = msg
-        return sendMsg.call(this, opts)
+        return cliUtils.signNSend(this, state.tim, opts)
       })
       .catch(err => logErr.call(this, err))
       .then(() => cb())
@@ -702,71 +612,7 @@ vorpal
 
 vorpal
   .command('addserver <url>', 'add a Tradle server url, and the providers running there')
-  .action(function (args, cb) {
-    if (!checkLoggedIn()) return cb()
-
-    const url = args.url.replace(/\/$/, '') // trim trailing slash
-    const providers = state.preferences.providers
-
-    Q.Promise((resolve, reject) => {
-        request
-          .get(url + '/info')
-          .end((err, res) => {
-            if (err) return reject(err)
-
-            resolve(res)
-          })
-      })
-      .then(res => {
-        // TODO:
-        // rm settransport
-        // add ls-contacts
-        // add txs to watch
-        const newProviders = res.body.providers
-        return Q.allSettled(newProviders.map(p => {
-          p.baseUrl = url
-          const saved = providers[p]
-          if (!saved || saved.baseUrl === url) {
-            providers[p.id] = p
-          }
-
-          const bot = p.bot
-          if (!bot) return
-
-          state.tim.addContactIdentity(bot.pub)
-          if (bot.txId) {
-            state.tim.watchTxs(bot.txId)
-          }
-
-          return getHash(bot.pub)
-            .then(hash => {
-              if (!state.preferences.aliases[p.id]) {
-                setAlias(p.id, hash)
-              }
-
-              return bot[CUR_HASH] = hash
-            })
-        }))
-        .then(results => {
-          let save
-          results.forEach((r, i) => {
-            if (!r.value) return
-
-            save = true
-            const provider = newProviders[i]
-            const id = provider.id
-            setAlias(id, provider.bot[CUR_HASH])
-            this.log(`added provider ${provider.org.name} with alias ${id}`)
-          })
-
-          if (save) {
-            savePreferences()
-          }
-        })
-      })
-      .catch(err => logErr.call(this, err))
-      .then(() => cb())
-  })
+  .action(addServer)
 
 vorpal
   .command('ls-providers', 'list providers loaded from added server urls')
@@ -781,27 +627,7 @@ vorpal
 vorpal
   .command('setcontactprovider <providerId> <identifier>', 'specify that a user with identifier <identifier> ' +
     'can be contacted at a specific provider')
-  .action(function (args, cb) {
-    if (!checkLoggedIn.call(this)) return cb()
-
-    const providerId = args.providerId
-    const providers = state.preferences.providers
-    const provider = providers && providers[providerId]
-    if (!provider) {
-      this.log(`provider with id ${providerId} not found`)
-      return cb()
-    }
-
-    const contacts = state.preferences.contacts
-    findRecipient(args.identifier)
-      .then(recipient => {
-        contacts[recipient[CUR_HASH]] =
-        contacts[recipient[ROOT_HASH]] = providerId
-        savePreferences()
-      })
-      .catch(err => logErr.call(this, err))
-      .then(() => cb())
-  })
+  .action(setContactProvider)
 
 vorpal
   .command('addcontact <alias> <pathToIdentity>', 'add a contact')
@@ -887,28 +713,6 @@ function toCoords (recipient) {
   return [{ [ROOT_HASH]: recipient[ROOT_HASH] }]
 }
 
-function previewSend (msg) {
-  let json = Buffer.isBuffer(msg)
-    ? JSON.parse(msg.toString())
-    : msg
-
-  return this.prompt([
-    {
-      type: 'confirm',
-      name: 'confirm',
-      message: `About to sign and send \n${prettify(json)}\n\nIs this OK? (yes)`,
-      default: true
-    }
-  ])
-  .then((result) => {
-    if (!result.confirm) {
-      throw new Error('send aborted')
-    }
-
-    return msg
-  })
-}
-
 // function maybeSign (msg) {
 //   return this.prompt([
 //     {
@@ -962,29 +766,6 @@ function getHash (msg) {
 function debug () {
   let logger = vorpal || console
   return logger.log.apply(logger, arguments)
-}
-
-function sendMsg (opts) {
-  let msg = opts.msg
-  return state.tim.sign(msg)
-    .then(previewSend.bind(this))
-    .then(buildMsg)
-    .then((buf) => {
-      opts.msg = buf
-      return state.tim.send(opts)
-    })
-    .then((entries) => {
-      this.log('message queued')
-      let rh = entries[0].get(ROOT_HASH)
-      let sentHandler = (info) => {
-        if (info[ROOT_HASH] === rh) {
-          this.log(`delivered ${info[TYPE] || 'untyped message'} with hash ${rh}`)
-          state.tim.removeListener('sent', sentHandler)
-        }
-      }
-
-      state.tim.on('sent', sentHandler)
-    })
 }
 
 function getUserIdentity (handle) {
@@ -1084,6 +865,16 @@ function setUser (args, cb) {
   // unecrypted mode
   otrKey = null
 
+  const providers = state.preferences.providers
+
+  tim.ready()
+    .then(() => {
+      Object.keys(providers).forEach(setupProvider)
+      state.preferences.servers.forEach(url => {
+        addServer.call(this, {url}, noop)
+      })
+    })
+
   tim._send = function (recipientHash, msg, recipientInfo) {
     let transport = transports[recipientHash]
     if (transport) {
@@ -1104,7 +895,6 @@ function setUser (args, cb) {
       // }
     }
 
-    const providers = state.preferences.providers
     let id = find(Object.keys(providers), id => {
       return providers[id].bot[CUR_HASH] === recipientHash
     })
@@ -1120,94 +910,16 @@ function setUser (args, cb) {
       return Q.reject(new Error('no transport for recipient'))
     }
 
-    const provider = providers[id]
-    const serverUrl = getProviderUrl(provider)
-    // if (state.preferences.transport === 'ws') {
-      const identifier = otrKey ? otrKey.fingerprint() : tim.myRootHash()
-      const url = `${serverUrl}/ws?from=` + identifier
-      transport = wsTransports[url]
-      if (!transport) {
-        const wsClient = new WebSocketClient({
-          url: url,
-          autoConnect: true
-        })
-
-        if (otrKey) {
-          transport = newSwitchboard({
-            identifier: identifier,
-            unreliable: wsClient,
-            clientForRecipient: function (recipient) {
-              return new OTRClient({
-                key: otrKey,
-                client: new Sendy(SENDY_OPTS),
-                theirFingerprint: recipient
-              })
-            }
-          })
-        } else {
-          transport = newSwitchboard({
-            identifier: identifier,
-            unreliable: wsClient,
-            clientForRecipient: function () {
-              return new Sendy(SENDY_OPTS)
-            }
-          })
-        }
-
-        wsClient.on('disconnect', function () {
-          transport.clients().forEach(function (c) {
-            // reset OTR session, restart on connect
-            // debug('aborting pending sends due to disconnect')
-            c.destroy()
-            // c.reset(true)
-          })
-        })
-
-        wsTransports[url] = transport
-
-        let timeouts = {}
-        transport.on('receiving', function (msg) {
-          clearTimeout(timeouts[msg.from])
-          delete timeouts[msg.from]
-        })
-
-        transport.on('404', function (recipient) {
-          if (!timeouts[recipient]) {
-            timeout = setTimeout(function () {
-              delete timeouts[recipient]
-              transport.cancelPending(recipient)
-            }, 10000)
-          }
-        })
-
-        transport.on('timeout', function (identifier) {
-          transport.cancelPending(identifier)
-        })
-      }
-    // } else {
-    //   transport = new HttpClient({
-    //     rootHash: tim.myRootHash()
-    //   })
-
-    //   transport.addRecipient(recipientHash, `${serverUrl}/send`)
-    // }
-
-    transports[recipientHash] = transport
+    transports[recipientHash] = setupProvider(id)
     // rootHashToClient[provider[ROOT_HASH]] = transport
-    transport.on('message', function (msg, from) {
-      var prop = otrKey ? 'fingerprint' : ROOT_HASH
-      tim.receiveMsg(msg, {
-        [prop]: from
-      })
-    })
 
     return tim._send.apply(this, arguments)
   }
 
   tim.once('destroy', () => {
-    for (let hash in transports) {
-      transports[hash].destroy()
-    }
+    // for (let hash in transports) {
+    //   transports[hash].destroy()
+    // }
 
     for (var url in wsTransports) {
       wsTransports[url].destroy()
@@ -1223,9 +935,195 @@ function setUser (args, cb) {
   logger.log(`Initializing Tradle client...`)
   cb()
 
-  function getTransport (rootHash) {
+  function setupProvider (id) {
+    const provider = providers[id]
+    const serverUrl = getProviderUrl(provider)
+    const identifier = otrKey ? otrKey.fingerprint() : tim.myRootHash()
+    const url = `${serverUrl}/ws?from=` + identifier
+    if (wsTransports[url]) return wsTransports[url]
 
+    const wsClient = new WebSocketClient({
+      url: url,
+      autoConnect: true
+    })
+
+    let transport
+    if (otrKey) {
+      transport = newSwitchboard({
+        identifier: identifier,
+        unreliable: wsClient,
+        clientForRecipient: function (recipient) {
+          return new OTRClient({
+            key: otrKey,
+            client: new Sendy(SENDY_OPTS),
+            theirFingerprint: recipient
+          })
+        }
+      })
+    } else {
+      transport = newSwitchboard({
+        identifier: identifier,
+        unreliable: wsClient,
+        clientForRecipient: function () {
+          return new Sendy(SENDY_OPTS)
+        }
+      })
+    }
+
+    wsClient.on('disconnect', function () {
+      transport.clients().forEach(function (c) {
+        // reset OTR session, restart on connect
+        // debug('aborting pending sends due to disconnect')
+        c.destroy()
+        // c.reset(true)
+      })
+    })
+
+    let timeouts = {}
+    transport.on('receiving', function (msg) {
+      clearTimeout(timeouts[msg.from])
+      delete timeouts[msg.from]
+    })
+
+    transport.on('404', function (recipient) {
+      if (!timeouts[recipient]) {
+        timeout = setTimeout(function () {
+          delete timeouts[recipient]
+          transport.cancelPending(recipient)
+        }, 10000)
+      }
+    })
+
+    transport.on('timeout', function (identifier) {
+      transport.cancelPending(identifier)
+    })
+
+    transport.on('message', function (msg, from) {
+      var prop = otrKey ? 'fingerprint' : ROOT_HASH
+
+      try {
+        var parsed = JSON.parse(msg)
+        if (parsed.data) {
+          // cleartext msg
+          parsed = JSON.parse(new Buffer(parsed.data, 'base64'))
+          if (parsed[TYPE] === 'tradle.SelfIntroduction') {
+            return processSelfIntroduction(parsed, id)
+          }
+        }
+      } catch (err) {}
+
+      tim.receiveMsg(msg, {
+        [prop]: from
+      })
+    })
+
+    return wsTransports[url] = transport
   }
+
+  function processSelfIntroduction (intro, providerId) {
+    const identity = intro.identity
+    tim.addContactIdentity(identity)
+      .then(() => {
+        setContactProvider({
+          providerId: providerId,
+          identifier: intro.pubkeys[0].fingerprint
+        }, noop)
+
+        logger.log(`added contact: ${JSON.stringify(identity, null, 2)}`)
+      })
+  }
+}
+
+function addServer (args, cb) {
+  if (!checkLoggedIn()) return cb()
+
+  const servers = state.preferences.servers
+  const url = args.url.replace(/\/$/, '') // trim trailing slash
+  if (servers.indexOf(url) === -1) {
+    state.preferences.servers.push(url)
+  }
+
+  const providers = state.preferences.providers
+
+  Q.Promise((resolve, reject) => {
+      request
+        .get(url + '/info')
+        .end((err, res) => {
+          if (err) return reject(err)
+
+          resolve(res)
+        })
+    })
+    .then(res => {
+      // TODO:
+      // rm settransport
+      // add ls-contacts
+      // add txs to watch
+      const newProviders = res.body.providers
+      return Q.allSettled(newProviders.map(p => {
+        p.baseUrl = url
+        const saved = providers[p]
+        if (!saved || saved.baseUrl === url) {
+          providers[p.id] = p
+        }
+
+        const bot = p.bot
+        if (!bot) return
+
+        state.tim.addContactIdentity(bot.pub)
+        if (bot.txId) {
+          state.tim.watchTxs(bot.txId)
+        }
+
+        return getHash(bot.pub)
+          .then(hash => {
+            if (!state.preferences.aliases[p.id]) {
+              setAlias(p.id, hash)
+            }
+
+            return bot[CUR_HASH] = hash
+          })
+      }))
+      .then(results => {
+        let save
+        results.forEach((r, i) => {
+          if (!r.value) return
+
+          save = true
+          const provider = newProviders[i]
+          const id = provider.id
+          setAlias(id, provider.bot[CUR_HASH])
+          this.log(`added provider ${provider.org.name} with alias ${id}`)
+        })
+
+        if (save) {
+          savePreferences()
+        }
+      })
+    })
+    .catch(err => logErr.call(this, err))
+    .then(() => cb())
+}
+function setContactProvider (args, cb) {
+  if (!checkLoggedIn.call(this)) return cb()
+
+  const providerId = args.providerId
+  const providers = state.preferences.providers
+  const provider = providers && providers[providerId]
+  if (!provider) {
+    this.log(`provider with id ${providerId} not found`)
+    return cb()
+  }
+
+  const contacts = state.preferences.contacts
+  findRecipient(args.identifier)
+    .then(recipient => {
+      contacts[recipient[CUR_HASH]] =
+      contacts[recipient[ROOT_HASH]] = providerId
+      savePreferences()
+    })
+    .catch(err => logErr.call(this, err))
+    .then(() => cb())
 }
 
 // function attachTransport (cb) {
@@ -1415,7 +1313,8 @@ function newPreferences () {
     transport: 'ws',
     aliases: {},
     providers: {},
-    contacts: {}
+    contacts: {},
+    servers: []
   }
 }
 
