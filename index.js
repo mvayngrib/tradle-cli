@@ -900,10 +900,7 @@ function setUser (args, cb) {
     })
 
     if (!id) {
-      const contact = state.preferences.contacts[recipientHash]
-      if (contact) {
-        id = contact.provider
-      }
+      id = state.preferences.contacts[recipientHash]
     }
 
     if (!id) {
@@ -1026,7 +1023,7 @@ function setUser (args, cb) {
       .then(() => {
         setContactProvider({
           providerId: providerId,
-          identifier: intro.pubkeys[0].fingerprint
+          identifier: identity.pubkeys[0].fingerprint
         }, noop)
 
         logger.log(`added contact: ${JSON.stringify(identity, null, 2)}`)
