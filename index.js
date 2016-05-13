@@ -1257,7 +1257,7 @@ function lookupAndLog (info) {
 }
 
 function setAlias (alias, identifier) {
-  state.preferences.aliases[alias] = identifier
+  state.preferences.aliases[alias.toLowerCase()] = identifier
   savePreferences()
 }
 
@@ -1271,7 +1271,7 @@ function savePreferences () {
 }
 
 function getAlias (alias) {
-  return state.preferences.aliases[alias]
+  return state.preferences.aliases[alias.toLowerCase()]
 }
 
 function getUserPath (handle) {
