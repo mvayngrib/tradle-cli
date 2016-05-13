@@ -59,14 +59,13 @@
       }
     },
     "@tradle/cli-utils": {
-      "version": "1.1.0",
-      "from": "https://registry.npmjs.org/@tradle/cli-utils/-/cli-utils-1.1.0.tgz",
-      "resolved": "https://registry.npmjs.org/@tradle/cli-utils/-/cli-utils-1.1.0.tgz",
+      "version": "1.2.0",
+      "from": "@tradle/cli-utils@latest",
       "dependencies": {
         "@tradle/constants": {
-          "version": "2.0.1",
-          "from": "https://registry.npmjs.org/@tradle/constants/-/constants-2.0.1.tgz",
-          "resolved": "https://registry.npmjs.org/@tradle/constants/-/constants-2.0.1.tgz"
+          "version": "2.0.3",
+          "from": "@tradle/constants@>=2.0.1 <3.0.0",
+          "resolved": "https://registry.npmjs.org/@tradle/constants/-/constants-2.0.3.tgz"
         }
       }
     },
